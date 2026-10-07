@@ -1,4 +1,5 @@
 import { getDbClient } from "./engine";
+import { getSupabase, isSupabaseConfigured } from "../supabase/server";
 import { DashboardFilters, OrdersFilters, ProductsFilters, InventoryFilters } from "../validation/schemas";
 
 export interface DashboardResponse {
@@ -29,9 +30,26 @@ export interface DashboardResponse {
 }
 
 export async function getDashboardMetrics(filters: DashboardFilters): Promise<DashboardResponse> {
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabase()!;
+    const { data, error } = await supabase.rpc("get_dashboard_metrics", {
+      p_from: filters.from || null,
+      p_to: filters.to || null,
+      p_marketplace: filters.marketplace || null,
+      p_warehouse: filters.warehouse || null,
+      p_sku: filters.sku || null,
+      p_category: filters.category || null,
+      p_status: filters.status || null,
+    });
+
+    if (!error && data) {
+      return data as DashboardResponse;
+    }
+  }
+
+  // Local / Fallback SQL Execution
   const db = await getDbClient();
 
-  // Check if orders exist
   const countRs = await db.execute("SELECT COUNT(*) as count FROM orders");
   const hasOrders = Number(countRs.rows[0].count) > 0;
 
@@ -57,42 +75,19 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
     };
   }
 
-  // Build filter conditions
   const conditions: string[] = ["1=1"];
   const params: any[] = [];
 
-  if (filters.from) {
-    conditions.push("o.order_date >= ?");
-    params.push(filters.from);
-  }
-  if (filters.to) {
-    conditions.push("o.order_date <= ?");
-    params.push(filters.to);
-  }
-  if (filters.marketplace) {
-    conditions.push("o.marketplace = ?");
-    params.push(filters.marketplace);
-  }
-  if (filters.warehouse) {
-    conditions.push("o.final_warehouse = ?");
-    params.push(filters.warehouse);
-  }
-  if (filters.category) {
-    conditions.push("o.category = ?");
-    params.push(filters.category);
-  }
-  if (filters.status) {
-    conditions.push("o.order_status = ?");
-    params.push(filters.status);
-  }
-  if (filters.sku) {
-    conditions.push("o.sku LIKE ?");
-    params.push(`%${filters.sku}%`);
-  }
+  if (filters.from) { conditions.push("o.order_date >= ?"); params.push(filters.from); }
+  if (filters.to) { conditions.push("o.order_date <= ?"); params.push(filters.to); }
+  if (filters.marketplace) { conditions.push("o.marketplace = ?"); params.push(filters.marketplace); }
+  if (filters.warehouse) { conditions.push("o.final_warehouse = ?"); params.push(filters.warehouse); }
+  if (filters.category) { conditions.push("o.category = ?"); params.push(filters.category); }
+  if (filters.status) { conditions.push("o.order_status = ?"); params.push(filters.status); }
+  if (filters.sku) { conditions.push("o.sku LIKE ?"); params.push(`%${filters.sku}%`); }
 
   const whereClause = conditions.join(" AND ");
 
-  // 1. Resolve date range for average consumption
   let minDate = filters.from;
   let maxDate = filters.to;
 
@@ -111,7 +106,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
     Math.round((new Date(maxDate).getTime() - new Date(minDate).getTime()) / (1000 * 60 * 60 * 24)) + 1
   );
 
-  // 2. Core KPIs aggregation
   const kpiRs = await db.execute({
     sql: `
       SELECT
@@ -137,7 +131,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
   const averageOrderValue = validOrders > 0 ? Number((totalSales / validOrders).toFixed(2)) : 0;
   const averageConsumptionPerDay = days > 0 ? Number((totalUnitsSold / days).toFixed(2)) : 0;
 
-  // 3. Highest selling product (sales amount based)
   const topSellingRs = await db.execute({
     sql: `
       SELECT o.sku, p.product_name,
@@ -161,7 +154,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
       }
     : null;
 
-  // 4. Highest return product by amount
   const topReturnAmountRs = await db.execute({
     sql: `
       SELECT o.sku, p.product_name,
@@ -183,7 +175,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
       }
     : null;
 
-  // 5. Highest return product by quantity
   const topReturnQtyRs = await db.execute({
     sql: `
       SELECT o.sku, p.product_name,
@@ -205,7 +196,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
       }
     : null;
 
-  // 6. Stock extremes: aggregated by SKU first across warehouses
   const lowestStockRs = await db.execute(`
     SELECT i.sku, p.product_name, SUM(i.available_quantity) as total_stock
     FROM inventory i
@@ -238,7 +228,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
       }
     : null;
 
-  // 7. Warehouse sales breakdown & ratio
   const warehouseRs = await db.execute({
     sql: `
       SELECT o.final_warehouse,
@@ -262,7 +251,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
     };
   });
 
-  // 8. Sales trend over time (daily aggregated)
   const trendRs = await db.execute({
     sql: `
       SELECT o.order_date,
@@ -284,7 +272,6 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
     units: Number(row.units || 0),
   }));
 
-  // 9. Top 5 products by sales amount
   const topProductsRs = await db.execute({
     sql: `
       SELECT o.sku, p.product_name, o.category,
@@ -337,34 +324,13 @@ export async function getOrders(filters: OrdersFilters) {
   const conditions: string[] = ["1=1"];
   const params: any[] = [];
 
-  if (filters.from) {
-    conditions.push("o.order_date >= ?");
-    params.push(filters.from);
-  }
-  if (filters.to) {
-    conditions.push("o.order_date <= ?");
-    params.push(filters.to);
-  }
-  if (filters.marketplace) {
-    conditions.push("o.marketplace = ?");
-    params.push(filters.marketplace);
-  }
-  if (filters.warehouse) {
-    conditions.push("o.final_warehouse = ?");
-    params.push(filters.warehouse);
-  }
-  if (filters.category) {
-    conditions.push("o.category = ?");
-    params.push(filters.category);
-  }
-  if (filters.status) {
-    conditions.push("o.order_status = ?");
-    params.push(filters.status);
-  }
-  if (filters.sku) {
-    conditions.push("o.sku LIKE ?");
-    params.push(`%${filters.sku}%`);
-  }
+  if (filters.from) { conditions.push("o.order_date >= ?"); params.push(filters.from); }
+  if (filters.to) { conditions.push("o.order_date <= ?"); params.push(filters.to); }
+  if (filters.marketplace) { conditions.push("o.marketplace = ?"); params.push(filters.marketplace); }
+  if (filters.warehouse) { conditions.push("o.final_warehouse = ?"); params.push(filters.warehouse); }
+  if (filters.category) { conditions.push("o.category = ?"); params.push(filters.category); }
+  if (filters.status) { conditions.push("o.order_status = ?"); params.push(filters.status); }
+  if (filters.sku) { conditions.push("o.sku LIKE ?"); params.push(`%${filters.sku}%`); }
   if (filters.search) {
     conditions.push("(o.order_id LIKE ? OR o.sku LIKE ? OR p.product_name LIKE ?)");
     params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
@@ -372,29 +338,20 @@ export async function getOrders(filters: OrdersFilters) {
 
   const whereClause = conditions.join(" AND ");
 
-  // Count total matching
   const countRs = await db.execute({
-    sql: `
-      SELECT COUNT(*) as total
-      FROM orders o
-      LEFT JOIN products p ON p.sku = o.sku
-      WHERE ${whereClause}
-    `,
+    sql: `SELECT COUNT(*) as total FROM orders o LEFT JOIN products p ON p.sku = o.sku WHERE ${whereClause}`,
     args: params,
   });
   const total = Number(countRs.rows[0].total || 0);
 
-  // Paginated query
   const offset = (filters.page - 1) * filters.pageSize;
 
-  // Sorting
   let orderColumn = "o.order_date";
   if (filters.sortBy === "order_amount") orderColumn = "o.order_amount";
   else if (filters.sortBy === "quantity") orderColumn = "o.quantity";
   else if (filters.sortBy === "order_id") orderColumn = "o.order_id";
   const orderDir = filters.sortDir.toUpperCase() === "ASC" ? "ASC" : "DESC";
 
-  // Pre-aggregate inventory by SKU to avoid row explosion / duplicate joins
   const ordersRs = await db.execute({
     sql: `
       SELECT
@@ -454,14 +411,8 @@ export async function getProducts(filters: ProductsFilters) {
   const conditions: string[] = ["1=1"];
   const params: any[] = [];
 
-  if (filters.category) {
-    conditions.push("p.category = ?");
-    params.push(filters.category);
-  }
-  if (filters.sku) {
-    conditions.push("p.sku LIKE ?");
-    params.push(`%${filters.sku}%`);
-  }
+  if (filters.category) { conditions.push("p.category = ?"); params.push(filters.category); }
+  if (filters.sku) { conditions.push("p.sku LIKE ?"); params.push(`%${filters.sku}%`); }
   if (filters.search) {
     conditions.push("(p.sku LIKE ? OR p.product_name LIKE ?)");
     params.push(`%${filters.search}%`, `%${filters.search}%`);
@@ -469,7 +420,6 @@ export async function getProducts(filters: ProductsFilters) {
 
   const whereClause = conditions.join(" AND ");
 
-  // Count total matching products
   const countRs = await db.execute({
     sql: `SELECT COUNT(*) as total FROM products p WHERE ${whereClause}`,
     args: params,
@@ -478,8 +428,6 @@ export async function getProducts(filters: ProductsFilters) {
 
   const offset = (filters.page - 1) * filters.pageSize;
 
-  // IMPORTANT: Inventory aggregated by SKU first!
-  // Orders aggregated by SKU first!
   const productsRs = await db.execute({
     sql: `
       SELECT
@@ -495,12 +443,8 @@ export async function getProducts(filters: ProductsFilters) {
         COALESCE(ord.top_marketplace, '-') as top_marketplace
       FROM products p
       LEFT JOIN (
-        SELECT
-          sku,
-          SUM(available_quantity) as total_stock,
-          COUNT(DISTINCT warehouse) as warehouse_count
-        FROM inventory
-        GROUP BY sku
+        SELECT sku, SUM(available_quantity) as total_stock, COUNT(DISTINCT warehouse) as warehouse_count
+        FROM inventory GROUP BY sku
       ) inv ON inv.sku = p.sku
       LEFT JOIN (
         SELECT
@@ -510,15 +454,11 @@ export async function getProducts(filters: ProductsFilters) {
           SUM(CASE WHEN order_status = 'Returned' THEN quantity ELSE 0 END) as returned_quantity,
           SUM(CASE WHEN order_status = 'Returned' THEN order_amount ELSE 0 END) as return_amount,
           (
-            SELECT marketplace
-            FROM orders o2
+            SELECT marketplace FROM orders o2
             WHERE o2.sku = o1.sku AND o2.order_status NOT IN ('Cancelled', 'Returned')
-            GROUP BY marketplace
-            ORDER BY SUM(order_amount) DESC
-            LIMIT 1
+            GROUP BY marketplace ORDER BY SUM(order_amount) DESC LIMIT 1
           ) as top_marketplace
-        FROM orders o1
-        GROUP BY sku
+        FROM orders o1 GROUP BY sku
       ) ord ON ord.sku = p.sku
       WHERE ${whereClause}
       ORDER BY p.sku ASC
@@ -552,7 +492,6 @@ export async function getProducts(filters: ProductsFilters) {
 export async function getInventory(filters: InventoryFilters) {
   const db = await getDbClient();
 
-  // Summary KPIs
   const summaryRs = await db.execute(`
     SELECT
       COUNT(DISTINCT sku) as total_skus,
@@ -567,35 +506,23 @@ export async function getInventory(filters: InventoryFilters) {
   const lowStockRs = await db.execute(`
     SELECT COUNT(*) as count FROM (
       SELECT sku, SUM(available_quantity) as total, MAX(reorder_level) as reorder
-      FROM inventory
-      GROUP BY sku
-      HAVING total > 0 AND total <= reorder
+      FROM inventory GROUP BY sku HAVING total > 0 AND total <= reorder
     )
   `);
   const lowStockItems = Number(lowStockRs.rows[0].count || 0);
 
   const outOfStockRs = await db.execute(`
     SELECT COUNT(*) as count FROM (
-      SELECT sku, SUM(available_quantity) as total
-      FROM inventory
-      GROUP BY sku
-      HAVING total = 0
+      SELECT sku, SUM(available_quantity) as total FROM inventory GROUP BY sku HAVING total = 0
     )
   `);
   const outOfStockItems = Number(outOfStockRs.rows[0].count || 0);
 
-  // Filtered listing
   const conditions: string[] = ["1=1"];
   const params: any[] = [];
 
-  if (filters.warehouse) {
-    conditions.push("i.warehouse = ?");
-    params.push(filters.warehouse);
-  }
-  if (filters.status) {
-    conditions.push("i.inventory_status = ?");
-    params.push(filters.status);
-  }
+  if (filters.warehouse) { conditions.push("i.warehouse = ?"); params.push(filters.warehouse); }
+  if (filters.status) { conditions.push("i.inventory_status = ?"); params.push(filters.status); }
   if (filters.search) {
     conditions.push("(i.sku LIKE ? OR p.product_name LIKE ?)");
     params.push(`%${filters.search}%`, `%${filters.search}%`);
@@ -604,12 +531,7 @@ export async function getInventory(filters: InventoryFilters) {
   const whereClause = conditions.join(" AND ");
 
   const countRs = await db.execute({
-    sql: `
-      SELECT COUNT(*) as total
-      FROM inventory i
-      LEFT JOIN products p ON p.sku = i.sku
-      WHERE ${whereClause}
-    `,
+    sql: `SELECT COUNT(*) as total FROM inventory i LEFT JOIN products p ON p.sku = i.sku WHERE ${whereClause}`,
     args: params,
   });
   const total = Number(countRs.rows[0].total || 0);
@@ -648,13 +570,7 @@ export async function getInventory(filters: InventoryFilters) {
   }));
 
   return {
-    summary: {
-      totalSkus,
-      totalStock,
-      lowStockItems,
-      outOfStockItems,
-      warehouseCount,
-    },
+    summary: { totalSkus, totalStock, lowStockItems, outOfStockItems, warehouseCount },
     data,
     total,
     page: filters.page,

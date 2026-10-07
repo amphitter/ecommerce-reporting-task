@@ -4,6 +4,8 @@ import { importCsv, ImportType } from "@/lib/db/import";
 import { getDatabaseCounts } from "@/lib/db/repository";
 import { getDbClient } from "@/lib/db/engine";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   const authError = await requireAuth();
   if (authError) return authError;

@@ -3,6 +3,8 @@ import { ordersQuerySchema } from "@/lib/validation/schemas";
 import { requireAuth } from "@/lib/auth/session";
 import { getDbClient } from "@/lib/db/engine";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   const authError = await requireAuth();
   if (authError) return authError;

@@ -1,23 +1,47 @@
-import { createClient } from "@libsql/client";
+import { createClient, Client } from "@libsql/client";
 import path from "path";
+import fs from "fs";
+import os from "os";
 
-const dbPath = path.resolve(process.cwd(), "data/nexusops.db");
-const client = createClient({
-  url: `file:${dbPath}`,
-});
-
+let client: Client | null = null;
 let initialized = false;
 
-export async function getDbClient() {
+function getDbPath(): string {
+  // On Vercel, the workspace directory is read-only.
+  // /tmp is the only writable filesystem in serverless functions.
+  if (process.env.VERCEL) {
+    return path.join(os.tmpdir(), "nexusops.db");
+  }
+
+  try {
+    const dir = path.resolve(process.cwd(), "data");
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    return path.join(dir, "nexusops.db");
+  } catch {
+    return path.join(os.tmpdir(), "nexusops.db");
+  }
+}
+
+export async function getDbClient(): Promise<Client> {
+  if (!client) {
+    const dbPath = getDbPath();
+    client = createClient({
+      url: `file:${dbPath}`,
+    });
+  }
+
   if (!initialized) {
-    await initTables();
+    await initTables(client);
     initialized = true;
   }
+
   return client;
 }
 
-async function initTables() {
-  await client.execute(`
+async function initTables(c: Client) {
+  await c.execute(`
     CREATE TABLE IF NOT EXISTS warehouses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT UNIQUE NOT NULL,
@@ -26,7 +50,7 @@ async function initTables() {
     );
   `);
 
-  await client.execute(`
+  await c.execute(`
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       product_id TEXT UNIQUE NOT NULL,
@@ -43,7 +67,7 @@ async function initTables() {
     );
   `);
 
-  await client.execute(`
+  await c.execute(`
     CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       order_id TEXT UNIQUE NOT NULL,
@@ -63,7 +87,7 @@ async function initTables() {
     );
   `);
 
-  await client.execute(`
+  await c.execute(`
     CREATE TABLE IF NOT EXISTS inventory (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sku TEXT NOT NULL,
@@ -79,15 +103,14 @@ async function initTables() {
     );
   `);
 
-  // Indexes based on actual query access patterns
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_orders_sku ON orders(sku);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_orders_marketplace ON orders(marketplace);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_orders_final_wh ON orders(final_warehouse);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_inventory_sku ON inventory(sku);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_inventory_wh ON inventory(warehouse);`);
-  await client.execute(`CREATE INDEX IF NOT EXISTS idx_inventory_status ON inventory(inventory_status);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_orders_sku ON orders(sku);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_orders_marketplace ON orders(marketplace);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_orders_final_wh ON orders(final_warehouse);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_inventory_sku ON inventory(sku);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_inventory_wh ON inventory(warehouse);`);
+  await c.execute(`CREATE INDEX IF NOT EXISTS idx_inventory_status ON inventory(inventory_status);`);
 }
