@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth/session";
 import { importCsv, ImportType } from "@/lib/db/import";
 import { getDatabaseCounts } from "@/lib/db/repository";
 import { getDbClient } from "@/lib/db/engine";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const counts = await getDatabaseCounts();
-    return NextResponse.json({ counts });
+    return NextResponse.json({ counts, isSupabase: isSupabaseConfigured() });
   } catch (error) {
     console.error("Get counts error:", error);
     return NextResponse.json({ error: "Failed to get database counts" }, { status: 500 });
@@ -67,6 +68,15 @@ export async function DELETE(request: NextRequest) {
   if (authError) return authError;
 
   try {
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabase()!;
+      await supabase.from("orders").delete().neq("id", 0);
+      await supabase.from("products").delete().neq("id", 0);
+      await supabase.from("inventory").delete().neq("id", 0);
+      await supabase.from("warehouses").delete().neq("id", 0);
+      return NextResponse.json({ success: true, message: "Supabase tables cleared successfully" });
+    }
+
     const db = await getDbClient();
     await db.execute("DELETE FROM orders");
     await db.execute("DELETE FROM products");

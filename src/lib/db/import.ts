@@ -1,5 +1,6 @@
 import { parse } from "csv-parse/sync";
 import { getDbClient } from "./engine";
+import { getSupabase, isSupabaseConfigured } from "../supabase/server";
 
 export type ImportType = "products" | "orders" | "inventory";
 
@@ -166,6 +167,60 @@ export async function importCsv(buffer: Buffer, type: ImportType): Promise<Impor
       };
     }
 
+    const useSupabase = isSupabaseConfigured();
+
+    if (useSupabase) {
+      const supabase = getSupabase()!;
+      const batchSize = 500;
+      let imported = 0;
+
+      for (let i = 0; i < validRows.length; i += batchSize) {
+        const batch = validRows.slice(i, i + batchSize);
+        let upsertError;
+
+        if (type === "products") {
+          ({ error: upsertError } = await supabase
+            .from("products")
+            .upsert(batch, { onConflict: "sku" }));
+        } else if (type === "orders") {
+          const warehouses = [...new Set(batch.map((r: any) => r.final_warehouse))].map((w: any) => ({
+            code: w,
+            name: w,
+          }));
+          await supabase.from("warehouses").upsert(warehouses, { onConflict: "code" });
+          ({ error: upsertError } = await supabase
+            .from("orders")
+            .upsert(batch, { onConflict: "order_id" }));
+        } else if (type === "inventory") {
+          ({ error: upsertError } = await supabase
+            .from("inventory")
+            .upsert(batch, { onConflict: "sku,warehouse" }));
+        }
+
+        if (upsertError) {
+          console.error("Supabase upsert error:", upsertError);
+          return {
+            success: false,
+            imported,
+            invalid: validRows.length - imported + errors.length,
+            errors: [...errors, `Supabase error: ${upsertError.message}`],
+            message: `Import failed: ${upsertError.message}`,
+          };
+        }
+
+        imported += batch.length;
+      }
+
+      return {
+        success: true,
+        imported,
+        invalid: errors.length,
+        errors,
+        message: `Imported ${imported} ${type} records into Supabase`,
+      };
+    }
+
+    // Local LibSQL Engine fallback
     const db = await getDbClient();
     const batchSize = 100;
     let imported = 0;
@@ -195,7 +250,6 @@ export async function importCsv(buffer: Buffer, type: ImportType): Promise<Impor
         }
       } else if (type === "orders") {
         for (const r of batch) {
-          // Record warehouse
           await db.execute({
             sql: `INSERT OR IGNORE INTO warehouses (code, name) VALUES (?, ?)`,
             args: [r.final_warehouse, r.final_warehouse],
@@ -263,7 +317,7 @@ export async function importCsv(buffer: Buffer, type: ImportType): Promise<Impor
       imported,
       invalid: errors.length,
       errors,
-      message: `Successfully imported ${imported} ${type}${imported !== 1 ? "s" : ""}${errors.length > 0 ? `, ${errors.length} invalid rows skipped` : ""}`,
+      message: `Successfully imported ${imported} ${type} records`,
     };
   } catch (error) {
     console.error("Import error:", error);
