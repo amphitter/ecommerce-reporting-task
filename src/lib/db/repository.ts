@@ -50,27 +50,29 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
       // If RPC returned empty, check if orders actually exist in Supabase
       const { count: orderCount } = await supabase.from("orders").select("id", { count: "exact", head: true });
       if (orderCount && orderCount > 0) {
-        // Direct Supabase calculation
-        let ordersQuery = supabase.from("orders").select(
-          "order_id, order_date, marketplace, sku, category, quantity, order_amount, order_status, final_warehouse"
-        );
-
-        if (filters.from) ordersQuery = ordersQuery.gte("order_date", filters.from);
-        if (filters.to) ordersQuery = ordersQuery.lte("order_date", filters.to);
-        if (filters.marketplace) ordersQuery = ordersQuery.eq("marketplace", filters.marketplace);
-        if (filters.warehouse) ordersQuery = ordersQuery.eq("final_warehouse", filters.warehouse);
-        if (filters.category) ordersQuery = ordersQuery.eq("category", filters.category);
-        if (filters.status) ordersQuery = ordersQuery.eq("order_status", filters.status);
-        if (filters.sku) ordersQuery = ordersQuery.ilike("sku", `%${filters.sku}%`);
+        // Direct Supabase calculation with fresh builder per batch to prevent query mutation
+        const getBatch = (fromIdx: number, toIdx: number) => {
+          let q = supabase.from("orders").select(
+            "order_id, order_date, marketplace, sku, category, quantity, order_amount, order_status, final_warehouse"
+          );
+          if (filters.from) q = q.gte("order_date", filters.from);
+          if (filters.to) q = q.lte("order_date", filters.to);
+          if (filters.marketplace) q = q.eq("marketplace", filters.marketplace);
+          if (filters.warehouse) q = q.eq("final_warehouse", filters.warehouse);
+          if (filters.category) q = q.eq("category", filters.category);
+          if (filters.status) q = q.eq("order_status", filters.status);
+          if (filters.sku) q = q.ilike("sku", `%${filters.sku}%`);
+          return q.range(fromIdx, toIdx);
+        };
 
         // Fetch up to 10,000 orders in batches of 1,000 to circumvent PostgREST 1,000 limit
         const orderBatches = await Promise.all([
-          ordersQuery.range(0, 999),
-          ordersQuery.range(1000, 1999),
-          ordersQuery.range(2000, 2999),
-          ordersQuery.range(3000, 3999),
-          ordersQuery.range(4000, 4999),
-          ordersQuery.range(5000, 5999),
+          getBatch(0, 999),
+          getBatch(1000, 1999),
+          getBatch(2000, 2999),
+          getBatch(3000, 3999),
+          getBatch(4000, 4999),
+          getBatch(5000, 5999),
         ]);
 
         const allOrders: any[] = [];

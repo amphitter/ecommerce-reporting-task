@@ -44,25 +44,21 @@ export async function tryAutoMigrate(): Promise<boolean> {
   try {
     const sql = postgres(pgUrl, { ssl: "require", max: 1 });
 
-    // 1. Core Tables
-    await sql`
+    // 1. Core Tables & Seed Marketplaces
+    await sql.unsafe(`
       CREATE TABLE IF NOT EXISTS warehouses (
         id SERIAL PRIMARY KEY,
         code TEXT UNIQUE NOT NULL,
         name TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `;
 
-    await sql`
       CREATE TABLE IF NOT EXISTS marketplaces (
         id SERIAL PRIMARY KEY,
         code TEXT UNIQUE NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `;
 
-    await sql`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
         product_id TEXT UNIQUE NOT NULL,
@@ -77,9 +73,7 @@ export async function tryAutoMigrate(): Promise<boolean> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `;
 
-    await sql`
       CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
         order_id TEXT UNIQUE NOT NULL,
@@ -97,9 +91,7 @@ export async function tryAutoMigrate(): Promise<boolean> {
         final_warehouse TEXT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `;
 
-    await sql`
       CREATE TABLE IF NOT EXISTS inventory (
         id SERIAL PRIMARY KEY,
         sku TEXT NOT NULL,
@@ -113,35 +105,29 @@ export async function tryAutoMigrate(): Promise<boolean> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(sku, warehouse)
       );
-    `;
 
-    // 2. Populate marketplaces from existing orders + default catalog
-    await sql`
       INSERT INTO marketplaces (code)
       VALUES ('Amazon'), ('Flipkart'), ('Meesho'), ('Myntra'), ('Shopify')
       ON CONFLICT (code) DO NOTHING;
-    `;
 
-    await sql`
       INSERT INTO marketplaces (code)
       SELECT DISTINCT marketplace FROM orders
       WHERE marketplace IS NOT NULL AND marketplace != ''
       ON CONFLICT (code) DO NOTHING;
-    `;
 
-    // 3. Indexes
-    await sql`CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_orders_sku ON orders(sku);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_orders_marketplace ON orders(marketplace);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_orders_final_warehouse ON orders(final_warehouse);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_inventory_sku ON inventory(sku);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_inventory_warehouse ON inventory(warehouse);`;
+      CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+      CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+      CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);
+      CREATE INDEX IF NOT EXISTS idx_orders_sku ON orders(sku);
+      CREATE INDEX IF NOT EXISTS idx_orders_marketplace ON orders(marketplace);
+      CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);
+      CREATE INDEX IF NOT EXISTS idx_orders_final_warehouse ON orders(final_warehouse);
+      CREATE INDEX IF NOT EXISTS idx_inventory_sku ON inventory(sku);
+      CREATE INDEX IF NOT EXISTS idx_inventory_warehouse ON inventory(warehouse);
+    `);
 
-    // 4. Function: get_distinct_filter_options
-    await sql`
+    // 2. Distinct Filter Options Function
+    await sql.unsafe(`
       CREATE OR REPLACE FUNCTION get_distinct_filter_options()
       RETURNS JSONB AS $$
       BEGIN
@@ -171,10 +157,10 @@ export async function tryAutoMigrate(): Promise<boolean> {
         );
       END;
       $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-    `;
+    `);
 
-    // 5. Function: get_dashboard_metrics
-    await sql`
+    // 3. Consolidated Dashboard Metrics Function
+    await sql.unsafe(`
       CREATE OR REPLACE FUNCTION get_dashboard_metrics(
           p_from DATE DEFAULT NULL,
           p_to DATE DEFAULT NULL,
@@ -368,7 +354,7 @@ export async function tryAutoMigrate(): Promise<boolean> {
           RETURN v_result;
       END;
       $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-    `;
+    `);
 
     await sql.end();
     return true;
