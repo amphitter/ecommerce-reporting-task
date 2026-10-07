@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { productsQuerySchema } from "@/lib/validation/schemas";
 import { requireAuth } from "@/lib/auth/session";
 import { getDbClient } from "@/lib/db/engine";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getSupabase, isSupabaseConfigured, isSupabaseReady } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -21,70 +21,80 @@ export async function GET(request: NextRequest) {
     ];
 
     let rows: any[] = [];
+    let supabaseLoaded = false;
 
-    if (isSupabaseConfigured()) {
-      const supabase = getSupabase()!;
+    if (await isSupabaseReady()) {
+      try {
+        const supabase = getSupabase()!;
 
-      const { data: invRows } = await supabase.from("inventory").select("sku, available_quantity, warehouse");
-      const invAgg = new Map<string, { total: number; warehouses: Set<string> }>();
-      (invRows || []).forEach((r: any) => {
-        const existing = invAgg.get(r.sku) || { total: 0, warehouses: new Set() };
-        existing.total += Number(r.available_quantity);
-        existing.warehouses.add(r.warehouse);
-        invAgg.set(r.sku, existing);
-      });
-
-      const { data: ordRows } = await supabase.from("orders").select("sku, order_status, quantity, order_amount, marketplace");
-      const ordAgg = new Map<string, any>();
-      (ordRows || []).forEach((o: any) => {
-        const existing = ordAgg.get(o.sku) || { sold: 0, sales: 0, retQty: 0, retAmount: 0, mpSales: new Map() };
-        const isValid = !["Cancelled", "Returned"].includes(o.order_status);
-        const isRet = o.order_status === "Returned";
-        if (isValid) {
-          existing.sold += Number(o.quantity);
-          existing.sales += Number(o.order_amount);
-          const mps = existing.mpSales.get(o.marketplace) || 0;
-          existing.mpSales.set(o.marketplace, mps + Number(o.order_amount));
-        }
-        if (isRet) {
-          existing.retQty += Number(o.quantity);
-          existing.retAmount += Number(o.order_amount);
-        }
-        ordAgg.set(o.sku, existing);
-      });
-
-      let query = supabase.from("products").select("sku, product_name, category");
-      if (filters.category) query = query.eq("category", filters.category);
-      if (filters.sku) query = query.ilike("sku", `%${filters.sku}%`);
-      if (filters.search) {
-        query = query.or(`sku.ilike.%${filters.search}%,product_name.ilike.%${filters.search}%`);
-      }
-
-      const { data, error } = await query.order("sku", { ascending: true }).limit(20000);
-      if (error) throw error;
-
-      rows = (data || []).map((p: any) => {
-        const inv = invAgg.get(p.sku) || { total: 0, warehouses: new Set() };
-        const ord = ordAgg.get(p.sku) || { sold: 0, sales: 0, retQty: 0, retAmount: 0, mpSales: new Map() };
-        let topMp = "-";
-        let topVal = 0;
-        ord.mpSales.forEach((v: number, k: string) => {
-          if (v > topVal) { topVal = v; topMp = k; }
+        const { data: invRows, error: invErr } = await supabase.from("inventory").select("sku, available_quantity, warehouse");
+        if (invErr) throw invErr;
+        const invAgg = new Map<string, { total: number; warehouses: Set<string> }>();
+        (invRows || []).forEach((r: any) => {
+          const existing = invAgg.get(r.sku) || { total: 0, warehouses: new Set() };
+          existing.total += Number(r.available_quantity);
+          existing.warehouses.add(r.warehouse);
+          invAgg.set(r.sku, existing);
         });
-        return {
-          sku: p.sku,
-          product_name: p.product_name,
-          category: p.category,
-          sold_quantity: ord.sold,
-          sales_amount: Number(ord.sales.toFixed(2)),
-          returned_quantity: ord.retQty,
-          return_amount: Number(ord.retAmount.toFixed(2)),
-          total_stock: inv.total,
-          warehouse_count: inv.warehouses.size,
-          top_marketplace: topMp,
-        };
-      });
-    } else {
+
+        const { data: ordRows, error: ordErr } = await supabase.from("orders").select("sku, order_status, quantity, order_amount, marketplace");
+        if (ordErr) throw ordErr;
+        const ordAgg = new Map<string, any>();
+        (ordRows || []).forEach((o: any) => {
+          const existing = ordAgg.get(o.sku) || { sold: 0, sales: 0, retQty: 0, retAmount: 0, mpSales: new Map() };
+          const isValid = !["Cancelled", "Returned"].includes(o.order_status);
+          const isRet = o.order_status === "Returned";
+          if (isValid) {
+            existing.sold += Number(o.quantity);
+            existing.sales += Number(o.order_amount);
+            const mps = existing.mpSales.get(o.marketplace) || 0;
+            existing.mpSales.set(o.marketplace, mps + Number(o.order_amount));
+          }
+          if (isRet) {
+            existing.retQty += Number(o.quantity);
+            existing.retAmount += Number(o.order_amount);
+          }
+          ordAgg.set(o.sku, existing);
+        });
+
+        let query = supabase.from("products").select("sku, product_name, category");
+        if (filters.category) query = query.eq("category", filters.category);
+        if (filters.sku) query = query.ilike("sku", `%${filters.sku}%`);
+        if (filters.search) {
+          query = query.or(`sku.ilike.%${filters.search}%,product_name.ilike.%${filters.search}%`);
+        }
+
+        const { data, error } = await query.order("sku", { ascending: true }).limit(20000);
+        if (error) throw error;
+
+        rows = (data || []).map((p: any) => {
+          const inv = invAgg.get(p.sku) || { total: 0, warehouses: new Set() };
+          const ord = ordAgg.get(p.sku) || { sold: 0, sales: 0, retQty: 0, retAmount: 0, mpSales: new Map() };
+          let topMp = "-";
+          let topVal = 0;
+          ord.mpSales.forEach((v: number, k: string) => {
+            if (v > topVal) { topVal = v; topMp = k; }
+          });
+          return {
+            sku: p.sku,
+            product_name: p.product_name,
+            category: p.category,
+            sold_quantity: ord.sold,
+            sales_amount: Number(ord.sales.toFixed(2)),
+            returned_quantity: ord.retQty,
+            return_amount: Number(ord.retAmount.toFixed(2)),
+            total_stock: inv.total,
+            warehouse_count: inv.warehouses.size,
+            top_marketplace: topMp,
+          };
+        });
+        supabaseLoaded = true;
+      } catch (err) {
+        console.warn("Supabase products export failed, falling back to SQLite:", err);
+      }
+    }
+
+    if (!supabaseLoaded) {
       const conditions: string[] = ["1=1"];
       const params: any[] = [];
 

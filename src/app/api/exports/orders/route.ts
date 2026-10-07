@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ordersQuerySchema } from "@/lib/validation/schemas";
 import { requireAuth } from "@/lib/auth/session";
 import { getDbClient } from "@/lib/db/engine";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getSupabase, isSupabaseConfigured, isSupabaseReady } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -21,46 +21,56 @@ export async function GET(request: NextRequest) {
     ];
 
     let rows: any[] = [];
+    let supabaseLoaded = false;
 
-    if (isSupabaseConfigured()) {
-      const supabase = getSupabase()!;
+    if (await isSupabaseReady()) {
+      try {
+        const supabase = getSupabase()!;
 
-      const { data: invRows } = await supabase.from("inventory").select("sku, available_quantity");
-      const stockMap = new Map<string, number>();
-      (invRows || []).forEach((r: any) => {
-        stockMap.set(r.sku, (stockMap.get(r.sku) || 0) + Number(r.available_quantity));
-      });
+        const { data: invRows, error: invErr } = await supabase.from("inventory").select("sku, available_quantity");
+        if (invErr) throw invErr;
+        const stockMap = new Map<string, number>();
+        (invRows || []).forEach((r: any) => {
+          stockMap.set(r.sku, (stockMap.get(r.sku) || 0) + Number(r.available_quantity));
+        });
 
-      const { data: prodRows } = await supabase.from("products").select("sku, product_name");
-      const nameMap = new Map<string, string>();
-      (prodRows || []).forEach((p: any) => {
-        nameMap.set(p.sku, p.product_name);
-      });
+        const { data: prodRows, error: prodErr } = await supabase.from("products").select("sku, product_name");
+        if (prodErr) throw prodErr;
+        const nameMap = new Map<string, string>();
+        (prodRows || []).forEach((p: any) => {
+          nameMap.set(p.sku, p.product_name);
+        });
 
-      let query = supabase.from("orders").select(
-        "order_id, order_date, marketplace, sku, category, quantity, selling_price, order_amount, order_status, final_warehouse"
-      );
+        let query = supabase.from("orders").select(
+          "order_id, order_date, marketplace, sku, category, quantity, selling_price, order_amount, order_status, final_warehouse"
+        );
 
-      if (filters.from) query = query.gte("order_date", filters.from);
-      if (filters.to) query = query.lte("order_date", filters.to);
-      if (filters.marketplace) query = query.eq("marketplace", filters.marketplace);
-      if (filters.warehouse) query = query.eq("final_warehouse", filters.warehouse);
-      if (filters.category) query = query.eq("category", filters.category);
-      if (filters.status) query = query.eq("order_status", filters.status);
-      if (filters.sku) query = query.ilike("sku", `%${filters.sku}%`);
-      if (filters.search) {
-        query = query.or(`order_id.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
+        if (filters.from) query = query.gte("order_date", filters.from);
+        if (filters.to) query = query.lte("order_date", filters.to);
+        if (filters.marketplace) query = query.eq("marketplace", filters.marketplace);
+        if (filters.warehouse) query = query.eq("final_warehouse", filters.warehouse);
+        if (filters.category) query = query.eq("category", filters.category);
+        if (filters.status) query = query.eq("order_status", filters.status);
+        if (filters.sku) query = query.ilike("sku", `%${filters.sku}%`);
+        if (filters.search) {
+          query = query.or(`order_id.ilike.%${filters.search}%,sku.ilike.%${filters.search}%`);
+        }
+
+        const { data, error } = await query.order("order_date", { ascending: false }).limit(20000);
+        if (error) throw error;
+
+        rows = (data || []).map((r: any) => ({
+          ...r,
+          product_name: nameMap.get(r.sku) || "Product",
+          available_stock: stockMap.get(r.sku) || 0,
+        }));
+        supabaseLoaded = true;
+      } catch (err) {
+        console.warn("Supabase orders export failed, falling back to SQLite:", err);
       }
+    }
 
-      const { data, error } = await query.order("order_date", { ascending: false }).limit(20000);
-      if (error) throw error;
-
-      rows = (data || []).map((r: any) => ({
-        ...r,
-        product_name: nameMap.get(r.sku) || "Product",
-        available_stock: stockMap.get(r.sku) || 0,
-      }));
-    } else {
+    if (!supabaseLoaded) {
       const conditions: string[] = ["1=1"];
       const params: any[] = [];
 
@@ -125,7 +135,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="orders_report_${new Date().toISOString().split("T")[0]}.csv"`,
+        "Content-Disposition": `attachment; filename="orders_export_${new Date().toISOString().split("T")[0]}.csv"`,
       },
     });
   } catch (error) {

@@ -12,6 +12,10 @@ import {
   Warehouse,
   Trash2,
   RefreshCw,
+  Copy,
+  Check,
+  Database,
+  ExternalLink,
 } from "lucide-react";
 
 type ImportType = "products" | "orders" | "inventory";
@@ -22,11 +26,20 @@ interface ImportCounts {
   inventory: number;
 }
 
+interface BackendStatus {
+  isSupabase: boolean;
+  supabaseReady: boolean;
+}
+
 export default function ImportPage() {
   const [counts, setCounts] = useState<ImportCounts>({ products: 0, orders: 0, inventory: 0 });
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>({ isSupabase: false, supabaseReady: false });
   const [selectedType, setSelectedType] = useState<ImportType>("products");
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showSql, setShowSql] = useState(false);
+  const [migrationSql, setMigrationSql] = useState<string>("");
   const [result, setResult] = useState<{
     success: boolean;
     imported: number;
@@ -43,14 +56,47 @@ export default function ImportPage() {
       if (data.counts) {
         setCounts(data.counts);
       }
+      setBackendStatus({
+        isSupabase: Boolean(data.isSupabase),
+        supabaseReady: Boolean(data.supabaseReady),
+      });
     } catch (e) {
       console.error(e);
     }
   };
 
+  const fetchSql = async () => {
+    try {
+      const res = await fetch("/api/schema");
+      const data = await res.json();
+      if (data.sql) {
+        setMigrationSql(data.sql);
+      }
+    } catch (e) {
+      console.error("Failed to load schema SQL", e);
+    }
+  };
+
   useEffect(() => {
     fetchCounts();
+    fetchSql();
   }, []);
+
+  const handleCopyMigration = async () => {
+    try {
+      if (!migrationSql) {
+        const res = await fetch("/api/schema");
+        const data = await res.json();
+        await navigator.clipboard.writeText(data.sql || "");
+      } else {
+        await navigator.clipboard.writeText(migrationSql);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch (err) {
+      console.error("Failed to copy", err);
+    }
+  };
 
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +157,21 @@ export default function ImportPage() {
         {/* Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-white border border-surface-border">
           <div>
-            <h2 className="text-sm font-semibold text-text-primary">CSV Import Manager</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-text-primary">CSV Import Manager</h2>
+              {backendStatus.isSupabase && backendStatus.supabaseReady && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <Database size={10} />
+                  Supabase Connected
+                </span>
+              )}
+              {backendStatus.isSupabase && !backendStatus.supabaseReady && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                  <Database size={10} />
+                  Local Session Mode
+                </span>
+              )}
+            </div>
             <p className="text-xs text-text-muted mt-0.5">
               Upload product catalogs, orders, and inventory files to populate the database.
             </p>
@@ -135,6 +195,64 @@ export default function ImportPage() {
             </button>
           </div>
         </div>
+
+        {/* Supabase Schema Action Banner (Shown when credentials exist but tables need to be created) */}
+        {backendStatus.isSupabase && !backendStatus.supabaseReady && (
+          <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="font-semibold flex items-center gap-1.5 text-amber-800">
+                  <AlertCircle size={15} />
+                  <span>Supabase Integration Action Required</span>
+                </div>
+                <p className="text-amber-700 text-[12px] leading-relaxed">
+                  Supabase credentials are authenticated in your deployment, but database tables (<code>products</code>, <code>orders</code>, <code>inventory</code>, <code>warehouses</code>) are not yet initialized in your Supabase SQL editor.
+                </p>
+                <p className="text-amber-700 text-[12px] leading-relaxed">
+                  The platform is safely operating in fallback local container storage. To activate permanent cloud persistence across Vercel lambdas, run the 1-click SQL migration below in your Supabase project.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCopyMigration}
+                  className="px-3 py-1.5 bg-amber-800 hover:bg-amber-900 text-white rounded font-medium text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copied ? "Copied SQL Script!" : "Copy SQL Migration"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSql(!showSql)}
+                  className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-800 rounded font-medium text-xs transition-colors"
+                >
+                  {showSql ? "Hide SQL" : "View SQL"}
+                </button>
+              </div>
+            </div>
+
+            {showSql && (
+              <div className="mt-4 pt-3 border-t border-amber-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-amber-800 text-[11px]">Migration Script:</span>
+                  <a
+                    href="https://supabase.com/dashboard"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-amber-800 hover:underline text-[11px] flex items-center gap-1"
+                  >
+                    <span>Open Supabase Dashboard</span>
+                    <ExternalLink size={11} />
+                  </a>
+                </div>
+                <pre className="bg-white p-3 rounded border border-amber-200 text-[11px] font-mono text-text-primary max-h-60 overflow-y-auto whitespace-pre">
+                  {migrationSql || "Loading schema SQL..."}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Current Database Records */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
