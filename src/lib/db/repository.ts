@@ -43,8 +43,239 @@ export async function getDashboardMetrics(filters: DashboardFilters): Promise<Da
         p_status: filters.status || null,
       });
 
-      if (!error && data) {
+      if (!error && data && data.kpis && (data.kpis.totalSales > 0 || data.kpis.totalUnitsSold > 0)) {
         return data as DashboardResponse;
+      }
+
+      // If RPC returned empty, check if orders actually exist in Supabase
+      const { count: orderCount } = await supabase.from("orders").select("id", { count: "exact", head: true });
+      if (orderCount && orderCount > 0) {
+        // Direct Supabase calculation
+        let ordersQuery = supabase.from("orders").select(
+          "order_id, order_date, marketplace, sku, category, quantity, order_amount, order_status, final_warehouse"
+        );
+
+        if (filters.from) ordersQuery = ordersQuery.gte("order_date", filters.from);
+        if (filters.to) ordersQuery = ordersQuery.lte("order_date", filters.to);
+        if (filters.marketplace) ordersQuery = ordersQuery.eq("marketplace", filters.marketplace);
+        if (filters.warehouse) ordersQuery = ordersQuery.eq("final_warehouse", filters.warehouse);
+        if (filters.category) ordersQuery = ordersQuery.eq("category", filters.category);
+        if (filters.status) ordersQuery = ordersQuery.eq("order_status", filters.status);
+        if (filters.sku) ordersQuery = ordersQuery.ilike("sku", `%${filters.sku}%`);
+
+        // Fetch up to 10,000 orders in batches of 1,000 to circumvent PostgREST 1,000 limit
+        const orderBatches = await Promise.all([
+          ordersQuery.range(0, 999),
+          ordersQuery.range(1000, 1999),
+          ordersQuery.range(2000, 2999),
+          ordersQuery.range(3000, 3999),
+          ordersQuery.range(4000, 4999),
+          ordersQuery.range(5000, 5999),
+        ]);
+
+        const allOrders: any[] = [];
+        orderBatches.forEach(b => {
+          if (b.data) allOrders.push(...b.data);
+        });
+
+        if (allOrders.length > 0) {
+          // Fetch inventory aggregated by SKU
+          const { data: invRows } = await supabase.from("inventory").select("sku, available_quantity");
+          const invStockMap = new Map<string, number>();
+          (invRows || []).forEach((r: any) => {
+            invStockMap.set(r.sku, (invStockMap.get(r.sku) || 0) + Number(r.available_quantity));
+          });
+
+          // Fetch products map
+          const { data: prodRows } = await supabase.from("products").select("sku, product_name");
+          const prodNameMap = new Map<string, string>();
+          (prodRows || []).forEach((p: any) => {
+            prodNameMap.set(p.sku, p.product_name);
+          });
+
+          let totalSales = 0;
+          let totalReturnAmount = 0;
+          let totalUnitsSold = 0;
+          let totalUnitsReturned = 0;
+          const validOrderIds = new Set<string>();
+
+          const productSales = new Map<string, { sales: number; units: number; returns: number; cat: string }>();
+          const productReturnsAmount = new Map<string, number>();
+          const productReturnsQty = new Map<string, number>();
+          const warehouseMap = new Map<string, { sales: number; units: number }>();
+          const dailyMap = new Map<string, { sales: number; returns: number; units: number }>();
+
+          let minDateStr = allOrders[0].order_date;
+          let maxDateStr = allOrders[0].order_date;
+
+          for (const o of allOrders) {
+            const isValid = !["Cancelled", "Returned"].includes(o.order_status);
+            const isRet = o.order_status === "Returned";
+            const amt = Number(o.order_amount);
+            const qty = Number(o.quantity);
+
+            if (o.order_date < minDateStr) minDateStr = o.order_date;
+            if (o.order_date > maxDateStr) maxDateStr = o.order_date;
+
+            if (isValid) {
+              totalSales += amt;
+              totalUnitsSold += qty;
+              validOrderIds.add(o.order_id);
+
+              const ps = productSales.get(o.sku) || { sales: 0, units: 0, returns: 0, cat: o.category };
+              ps.sales += amt;
+              ps.units += qty;
+              productSales.set(o.sku, ps);
+
+              const wh = warehouseMap.get(o.final_warehouse) || { sales: 0, units: 0 };
+              wh.sales += amt;
+              wh.units += qty;
+              warehouseMap.set(o.final_warehouse, wh);
+
+              const day = dailyMap.get(o.order_date) || { sales: 0, returns: 0, units: 0 };
+              day.sales += amt;
+              day.units += qty;
+              dailyMap.set(o.order_date, day);
+            }
+
+            if (isRet) {
+              totalReturnAmount += amt;
+              totalUnitsReturned += qty;
+
+              productReturnsAmount.set(o.sku, (productReturnsAmount.get(o.sku) || 0) + amt);
+              productReturnsQty.set(o.sku, (productReturnsQty.get(o.sku) || 0) + qty);
+
+              const ps = productSales.get(o.sku) || { sales: 0, units: 0, returns: 0, cat: o.category };
+              ps.returns += amt;
+              productSales.set(o.sku, ps);
+
+              const day = dailyMap.get(o.order_date) || { sales: 0, returns: 0, units: 0 };
+              day.returns += amt;
+              dailyMap.set(o.order_date, day);
+            }
+          }
+
+          const validOrderCount = validOrderIds.size;
+          const averageOrderValue = validOrderCount > 0 ? Number((totalSales / validOrderCount).toFixed(2)) : 0;
+          const returnRate = totalUnitsSold > 0 ? Number((totalUnitsReturned / totalUnitsSold).toFixed(4)) : 0;
+
+          const dMin = new Date(filters.from || minDateStr);
+          const dMax = new Date(filters.to || maxDateStr);
+          const diffDays = Math.max(1, Math.round((dMax.getTime() - dMin.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+          const averageConsumptionPerDay = Number((totalUnitsSold / diffDays).toFixed(2));
+
+          // Highest selling product by sales amount
+          let topSellingSku = "";
+          let maxSalesAmt = -1;
+          productSales.forEach((v, k) => {
+            if (v.sales > maxSalesAmt) {
+              maxSalesAmt = v.sales;
+              topSellingSku = k;
+            }
+          });
+
+          const highestSellingProduct = topSellingSku ? {
+            sku: topSellingSku,
+            product_name: prodNameMap.get(topSellingSku) || "Product",
+            sales_amount: maxSalesAmt,
+            units_sold: productSales.get(topSellingSku)!.units,
+          } : null;
+
+          // Highest return by amount
+          let topRetAmtSku = "";
+          let maxRetAmt = -1;
+          productReturnsAmount.forEach((v, k) => {
+            if (v > maxRetAmt) { maxRetAmt = v; topRetAmtSku = k; }
+          });
+          const highestReturnProductByAmount = topRetAmtSku ? {
+            sku: topRetAmtSku,
+            product_name: prodNameMap.get(topRetAmtSku) || "Product",
+            return_amount: maxRetAmt,
+          } : null;
+
+          // Highest return by quantity
+          let topRetQtySku = "";
+          let maxRetQty = -1;
+          productReturnsQty.forEach((v, k) => {
+            if (v > maxRetQty) { maxRetQty = v; topRetQtySku = k; }
+          });
+          const highestReturnProductByQuantity = topRetQtySku ? {
+            sku: topRetQtySku,
+            product_name: prodNameMap.get(topRetQtySku) || "Product",
+            return_units: maxRetQty,
+          } : null;
+
+          // Lowest and highest stock products
+          let lowestStockSku = "";
+          let minStock = Infinity;
+          let highestStockSku = "";
+          let maxStock = -1;
+          invStockMap.forEach((v, k) => {
+            if (v < minStock) { minStock = v; lowestStockSku = k; }
+            if (v > maxStock) { maxStock = v; highestStockSku = k; }
+          });
+
+          const lowestStockProduct = lowestStockSku ? {
+            sku: lowestStockSku,
+            product_name: prodNameMap.get(lowestStockSku) || "Product",
+            total_stock: minStock,
+          } : null;
+
+          const highestStockProduct = highestStockSku ? {
+            sku: highestStockSku,
+            product_name: prodNameMap.get(highestStockSku) || "Product",
+            total_stock: maxStock,
+          } : null;
+
+          // Warehouse Sales
+          const warehouseSales = [...warehouseMap.entries()].map(([warehouse, val]) => ({
+            warehouse,
+            sales: Number(val.sales.toFixed(2)),
+            units: val.units,
+            percentage: totalSales > 0 ? Number(((val.sales / totalSales) * 100).toFixed(1)) : 0,
+          })).sort((a, b) => b.sales - a.sales);
+
+          // Sales Trend
+          const salesTrend = [...dailyMap.entries()].map(([date, val]) => ({
+            date,
+            sales: Number(val.sales.toFixed(2)),
+            returns: Number(val.returns.toFixed(2)),
+            units: val.units,
+          })).sort((a, b) => a.date.localeCompare(b.date));
+
+          // Top 5 Products
+          const topProducts = [...productSales.entries()]
+            .sort((a, b) => b[1].sales - a[1].sales)
+            .slice(0, 5)
+            .map(([sku, val]) => ({
+              sku,
+              product_name: prodNameMap.get(sku) || "Product",
+              category: val.cat,
+              sales: Number(val.sales.toFixed(2)),
+              units: val.units,
+              returns: Number(val.returns.toFixed(2)),
+            }));
+
+          return {
+            kpis: {
+              totalSales: Number(totalSales.toFixed(2)),
+              totalReturnAmount: Number(totalReturnAmount.toFixed(2)),
+              totalUnitsSold,
+              totalUnitsReturned,
+              highestReturnProductByAmount,
+              highestReturnProductByQuantity,
+              lowestStockProduct,
+              highestStockProduct,
+              averageConsumptionPerDay,
+              highestSellingProduct,
+              returnRate,
+              averageOrderValue,
+            },
+            warehouseSales,
+            salesTrend,
+            topProducts,
+          };
+        }
       }
     } catch (err) {
       console.warn("Supabase getDashboardMetrics failed, falling back to local DB:", err);
@@ -830,19 +1061,54 @@ export async function getFilterOptions() {
   if (await isSupabaseReady()) {
     try {
       const supabase = getSupabase()!;
+
+      // 1. Try RPC first if defined
+      const { data: rpcData, error: rpcErr } = await supabase.rpc("get_distinct_filter_options");
+      if (!rpcErr && rpcData && rpcData.marketplaces && rpcData.marketplaces.length > 0) {
+        return {
+          marketplaces: (rpcData.marketplaces || []).filter(Boolean).sort(),
+          warehouses: (rpcData.warehouses || []).filter(Boolean).sort(),
+          categories: (rpcData.categories || []).filter(Boolean).sort(),
+        };
+      }
+
+      // 2. Fetch from dedicated tables & distinct scans
       const [mpRs, whRs, catRs] = await Promise.all([
-        supabase.from("orders").select("marketplace").not("marketplace", "is", null),
-        supabase.from("orders").select("final_warehouse").not("final_warehouse", "is", null),
-        supabase.from("products").select("category").not("category", "is", null),
+        supabase.from("marketplaces").select("code"),
+        supabase.from("warehouses").select("code"),
+        supabase.from("products").select("category").limit(2000),
       ]);
 
-      if (!mpRs.error && !whRs.error && !catRs.error) {
-        const marketplaces = [...new Set((mpRs.data || []).map((r: any) => r.marketplace))].sort();
-        const warehouses = [...new Set((whRs.data || []).map((r: any) => r.final_warehouse))].sort();
-        const categories = [...new Set((catRs.data || []).map((r: any) => r.category))].sort();
+      const marketplaceSet = new Set<string>();
+      (mpRs.data || []).forEach((r: any) => { if (r.code) marketplaceSet.add(r.code); });
 
-        return { marketplaces, warehouses, categories };
+      // If marketplaces table wasn't seeded yet, query candidate marketplaces
+      if (marketplaceSet.size < 5) {
+        const defaultMarketplaces = ["Amazon", "Flipkart", "Meesho", "Myntra", "Shopify"];
+        await Promise.all(defaultMarketplaces.map(async (m) => {
+          const { count } = await supabase.from("orders").select("id", { count: "exact", head: true }).eq("marketplace", m);
+          if (count && count > 0) marketplaceSet.add(m);
+        }));
       }
+
+      const warehouseSet = new Set<string>();
+      (whRs.data || []).forEach((r: any) => { if (r.code) warehouseSet.add(r.code); });
+      if (warehouseSet.size < 4) {
+        const defaultWarehouses = ["WH-EAST", "WH-NORTH", "WH-SOUTH", "WH-WEST"];
+        await Promise.all(defaultWarehouses.map(async (w) => {
+          const { count } = await supabase.from("orders").select("id", { count: "exact", head: true }).eq("final_warehouse", w);
+          if (count && count > 0) warehouseSet.add(w);
+        }));
+      }
+
+      const categorySet = new Set<string>();
+      (catRs.data || []).forEach((r: any) => { if (r.category) categorySet.add(r.category); });
+
+      return {
+        marketplaces: [...marketplaceSet].sort(),
+        warehouses: [...warehouseSet].sort(),
+        categories: [...categorySet].sort(),
+      };
     } catch (err) {
       console.warn("Supabase getFilterOptions failed, falling back to local DB:", err);
     }
@@ -856,10 +1122,20 @@ export async function getFilterOptions() {
     db.execute("SELECT DISTINCT category FROM products WHERE category IS NOT NULL ORDER BY category"),
   ]);
 
+  const mpList = [...new Set(marketplacesRs.rows.map(r => String(r.marketplace)).filter(Boolean))];
+  if (mpList.length === 0) {
+    ["Amazon", "Flipkart", "Meesho", "Myntra", "Shopify"].forEach(m => mpList.push(m));
+  }
+
+  const whList = [...new Set(warehousesRs.rows.map(r => String(r.final_warehouse)).filter(Boolean))];
+  if (whList.length === 0) {
+    ["WH-EAST", "WH-NORTH", "WH-SOUTH", "WH-WEST"].forEach(w => whList.push(w));
+  }
+
   return {
-    marketplaces: marketplacesRs.rows.map(r => String(r.marketplace)),
-    warehouses: warehousesRs.rows.map(r => String(r.final_warehouse)),
-    categories: categoriesRs.rows.map(r => String(r.category)),
+    marketplaces: mpList.sort(),
+    warehouses: whList.sort(),
+    categories: categoriesRs.rows.map(r => String(r.category)).sort(),
   };
 }
 

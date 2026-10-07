@@ -122,17 +122,33 @@ export default function DashboardPage() {
         {/* Empty State */}
         {isEmpty && (
           <div className="card p-12 text-center flex flex-col items-center justify-center max-w-lg mx-auto my-6">
-            <h3 className="text-sm font-semibold text-text-primary">No data found for the selected filters.</h3>
+            <h3 className="text-sm font-semibold text-text-primary">
+              {Object.values(filters).some(v => v !== undefined && v !== "")
+                ? "No data matches your active filters"
+                : "No data found"}
+            </h3>
             <p className="text-xs text-text-muted mt-1 mb-4">
-              Import product, order, and inventory CSV files to populate reporting metrics.
+              {Object.values(filters).some(v => v !== undefined && v !== "")
+                ? "Try clearing or adjusting your date range, marketplace, or warehouse filters."
+                : "Import product, order, and inventory CSV files to populate reporting metrics."}
             </p>
-            <Link
-              href="/admin/import"
-              className="btn-primary text-xs inline-flex items-center gap-1.5 h-8"
-            >
-              <span>Go to Import</span>
-              <ArrowRight size={13} />
-            </Link>
+            {Object.values(filters).some(v => v !== undefined && v !== "") ? (
+              <button
+                type="button"
+                onClick={() => setFilters({})}
+                className="btn-secondary text-xs inline-flex items-center gap-1.5 h-8"
+              >
+                <span>Reset All Filters</span>
+              </button>
+            ) : (
+              <Link
+                href="/admin/import"
+                className="btn-primary text-xs inline-flex items-center gap-1.5 h-8"
+              >
+                <span>Go to Import</span>
+                <ArrowRight size={13} />
+              </Link>
+            )}
           </div>
         )}
 

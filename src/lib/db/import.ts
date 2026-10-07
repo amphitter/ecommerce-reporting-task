@@ -190,6 +190,12 @@ export async function importCsv(buffer: Buffer, type: ImportType): Promise<Impor
               name: w,
             }));
             await supabase.from("warehouses").upsert(warehouses, { onConflict: "code" });
+
+            const marketplaces = [...new Set(batch.map((r: any) => r.marketplace).filter(Boolean))].map((m: any) => ({
+              code: m,
+            }));
+            await supabase.from("marketplaces").upsert(marketplaces, { onConflict: "code" });
+
             ({ error: upsertError } = await supabase
               .from("orders")
               .upsert(batch, { onConflict: "order_id" }));
