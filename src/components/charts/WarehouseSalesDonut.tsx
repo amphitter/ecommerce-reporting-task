@@ -36,8 +36,8 @@ export default function WarehouseSalesDonut({ data, loading = false }: Warehouse
     <div className="card p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="font-semibold text-text-primary text-sm">Warehouse Sales & Allocation</h3>
-          <p className="text-xs text-text-muted mt-0.5">Node throughput share & fulfillment distribution</p>
+          <h3 className="font-semibold text-text-primary text-sm">Warehouse Sales Distribution</h3>
+          <p className="text-xs text-text-muted mt-0.5">Share of valid sales across fulfillment warehouses</p>
         </div>
       </div>
 
@@ -86,7 +86,7 @@ export default function WarehouseSalesDonut({ data, loading = false }: Warehouse
           </ResponsiveContainer>
           {/* Center text */}
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Nodes</span>
+            <span className="text-[10px] uppercase tracking-wider text-text-muted font-medium">Warehouses</span>
             <span className="text-xl font-bold text-text-primary tabular-nums">{data.length}</span>
             <span className="text-[10px] text-text-muted">Active</span>
           </div>

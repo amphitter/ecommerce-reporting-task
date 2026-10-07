@@ -27,7 +27,6 @@ The platform is designed around six core engineering principles: **Correctness, 
   - Bulk ingestion pipeline for `products.csv` (1,000 items), `orders.csv` (5,000 items), and `inventory.csv` (4,000 items).
   - Row-level Zod validation, price checks, non-negative quantity constraints.
   - Re-importing does not create duplicates.
-  - 1-click sample dataset loader for instant demonstration.
 - **Filtered Server-Side CSV Exports**:
   - Order-wise and Product-wise export endpoints that stream CSV downloads directly from filtered database queries without downloading the entire dataset to the browser.
 - **Enterprise Security & Auth**:
@@ -210,8 +209,8 @@ Executes the Vitest test suite covering warehouse allocation, sales/returns excl
    - **Products CSV** (`products.csv`, 1,000 rows)
    - **Orders CSV** (`orders.csv`, 5,000 rows)
    - **Inventory CSV** (`inventory.csv`, 4,000 rows)
-4. Upload your CSV files or click the **1-Click Import Sample** button to instantly load the assignment datasets.
-5. Watch live progress and inspect the validation summary. Once imported, all operational dashboards and reports are immediately populated.
+4. Upload your CSV files (`products.csv`, `orders.csv`, `inventory.csv`) and click **Upload & Import**.
+5. Inspect the validation summary. Once imported, all operational dashboards and reports are immediately populated.
 
 ---
 

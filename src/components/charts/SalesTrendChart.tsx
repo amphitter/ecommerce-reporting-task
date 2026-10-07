@@ -56,7 +56,7 @@ export default function SalesTrendChart({ data, loading = false }: SalesTrendPro
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="font-semibold text-text-primary text-sm">Sales & Returns Overview</h3>
-          <p className="text-xs text-text-muted mt-0.5">Gross revenue vs return leakage over time</p>
+          <p className="text-xs text-text-muted mt-0.5">Sales revenue and return amounts over time</p>
         </div>
       </div>
 

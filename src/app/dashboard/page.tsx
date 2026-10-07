@@ -19,9 +19,7 @@ import {
   PackageCheck,
   Zap,
   Download,
-  Database,
   ArrowRight,
-  Flame,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -77,7 +75,7 @@ export default function DashboardPage() {
       setData(json);
     } catch (err) {
       console.error(err);
-      setError("Unable to load dashboard data. Please try again.");
+      setError("Unable to load data. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -87,69 +85,62 @@ export default function DashboardPage() {
     fetchDashboard();
   }, [fetchDashboard]);
 
-  const isEmpty = !loading && (!data || data.kpis.totalSales === 0 && data.kpis.totalUnitsSold === 0);
+  const isEmpty = !loading && (!data || (data.kpis.totalSales === 0 && data.kpis.totalUnitsSold === 0));
 
   return (
-    <AppShell title="E-commerce Sales & Inventory Dashboard" breadcrumb={["NexusOps", "Enterprise Portal", "Dashboard"]}>
+    <AppShell title="Dashboard" breadcrumb={["NexusOps", "Dashboard"]}>
       <div className="space-y-6">
-        {/* Top Operational Banner */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-lg bg-white border border-surface-border">
+        {/* Header Action Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-white border border-surface-border">
           <div>
-            <div className="flex items-center gap-2 text-[11px] text-text-muted font-mono uppercase tracking-wider mb-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Global Fulfillment Nexus &bull; Live Telemetry</span>
-            </div>
-            <h2 className="text-base font-bold text-text-primary">Operational Pulse & Analytics</h2>
+            <h2 className="text-base font-semibold text-text-primary">E-commerce Sales & Inventory</h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Real-time velocity, returns anomalies, multi-warehouse run-rates, and stock allocations.
+              Consolidated sales performance, returns, and inventory distribution.
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/admin/import"
-              className="btn-secondary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
-            >
-              <Database size={14} className="text-brand-blue" />
-              <span>Import Datasets</span>
-            </Link>
             <a
               href="/api/exports/orders"
-              className="btn-primary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
+              download
+              className="btn-secondary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
             >
               <Download size={14} />
-              <span>Export CSV</span>
+              <span>Export Orders</span>
             </a>
+            <Link
+              href="/admin/import"
+              className="btn-primary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
+            >
+              <span>Import Data</span>
+            </Link>
           </div>
         </div>
 
         {/* Global Filter Bar */}
         <FilterBar filters={filters} onChange={setFilters} />
 
-        {/* Empty State when no CSV imported */}
+        {/* Empty State */}
         {isEmpty && (
-          <div className="card p-10 text-center flex flex-col items-center justify-center max-w-xl mx-auto my-8">
-            <div className="w-12 h-12 rounded-full bg-blue-50 text-brand-blue flex items-center justify-center mb-3">
-              <Database size={24} />
-            </div>
-            <h3 className="text-base font-semibold text-text-primary">No Data Records Found</h3>
-            <p className="text-xs text-text-muted max-w-md mt-1 mb-5">
-              The platform database is currently fresh and clean. To view real-time sales, return analytics, stock levels, and warehouse allocations, please import the provided CSV files.
+          <div className="card p-12 text-center flex flex-col items-center justify-center max-w-lg mx-auto my-6">
+            <h3 className="text-sm font-semibold text-text-primary">No data found for the selected filters.</h3>
+            <p className="text-xs text-text-muted mt-1 mb-4">
+              Import product, order, and inventory CSV files to populate reporting metrics.
             </p>
             <Link
               href="/admin/import"
-              className="btn-primary text-xs flex items-center gap-2 h-9"
+              className="btn-primary text-xs inline-flex items-center gap-1.5 h-8"
             >
-              <span>Go to CSV Import Manager</span>
-              <ArrowRight size={14} />
+              <span>Go to Import</span>
+              <ArrowRight size={13} />
             </Link>
           </div>
         )}
 
         {/* Error State */}
         {error && (
-          <div className="card p-5 bg-red-50 border-red-200 text-xs flex items-center justify-between">
+          <div className="card p-4 bg-red-50 border-red-200 text-xs flex items-center justify-between">
             <div className="flex items-center gap-2 text-critical font-medium">
-              <AlertTriangle size={18} />
+              <AlertTriangle size={16} />
               <span>{error}</span>
             </div>
             <button onClick={fetchDashboard} className="btn-secondary text-xs h-7">
@@ -176,7 +167,7 @@ export default function DashboardPage() {
               <KpiCard
                 label="Total Return Amount"
                 value={`$${(data?.kpis.totalReturnAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                subtext={`${data?.kpis.totalUnitsReturned || 0} returned orders`}
+                subtext="Total amount from returned orders"
                 icon={TrendingDown}
                 accent="critical"
                 loading={loading}
@@ -185,8 +176,8 @@ export default function DashboardPage() {
               {/* 3. Total Units Sold */}
               <KpiCard
                 label="Total Units Sold"
-                value={`${(data?.kpis.totalUnitsSold || 0).toLocaleString()} pcs`}
-                subtext="Net units dispatched"
+                value={`${(data?.kpis.totalUnitsSold || 0).toLocaleString()}`}
+                subtext="Valid orders unit volume"
                 icon={ShoppingBag}
                 loading={loading}
               />
@@ -194,8 +185,8 @@ export default function DashboardPage() {
               {/* 4. Total Units Returned */}
               <KpiCard
                 label="Total Units Returned"
-                value={`${(data?.kpis.totalUnitsReturned || 0).toLocaleString()} pcs`}
-                subtext="Defects & customer returns"
+                value={`${(data?.kpis.totalUnitsReturned || 0).toLocaleString()}`}
+                subtext="Returned quantity"
                 icon={RotateCcw}
                 accent="critical"
                 loading={loading}
@@ -205,7 +196,7 @@ export default function DashboardPage() {
               <KpiCard
                 label="Return Rate"
                 value={`${((data?.kpis.returnRate || 0) * 100).toFixed(2)}%`}
-                subtext="Total units returned / Total units sold"
+                subtext="Units returned / units sold"
                 icon={Percent}
                 accent={(data?.kpis.returnRate || 0) > 0.05 ? "critical" : "default"}
                 loading={loading}
@@ -215,23 +206,23 @@ export default function DashboardPage() {
               <KpiCard
                 label="Average Order Value"
                 value={`$${(data?.kpis.averageOrderValue || 0).toFixed(2)}`}
-                subtext="Total valid sales / Valid orders"
+                subtext="Sales amount / valid orders"
                 icon={Receipt}
                 loading={loading}
               />
 
               {/* 7. Highest Selling Product (By Amount) */}
               <KpiCard
-                label="Top Revenue Champion"
+                label="Highest-Selling Product"
                 value={
-                  <div className="truncate text-base font-bold" title={data?.kpis.highestSellingProduct?.product_name || "None"}>
+                  <div className="truncate text-sm font-semibold" title={data?.kpis.highestSellingProduct?.product_name || "None"}>
                     {data?.kpis.highestSellingProduct?.product_name || "None"}
                   </div>
                 }
                 subtext={
                   data?.kpis.highestSellingProduct ? (
-                    <span className="text-success font-medium">
-                      ${data.kpis.highestSellingProduct.sales_amount.toLocaleString()} ({data.kpis.highestSellingProduct.units_sold} units) &bull; By Amount
+                    <span className="text-text-secondary">
+                      ${data.kpis.highestSellingProduct.sales_amount.toLocaleString()} &bull; Determined by sales amount
                     </span>
                   ) : "Determined by sales amount"
                 }
@@ -242,16 +233,16 @@ export default function DashboardPage() {
 
               {/* 8. Highest Return Product by Amount */}
               <KpiCard
-                label="Top Return Loss ($)"
+                label="Highest Return Product (Amount)"
                 value={
-                  <div className="truncate text-base font-bold text-critical" title={data?.kpis.highestReturnProductByAmount?.product_name || "None"}>
+                  <div className="truncate text-sm font-semibold text-critical" title={data?.kpis.highestReturnProductByAmount?.product_name || "None"}>
                     {data?.kpis.highestReturnProductByAmount?.product_name || "None"}
                   </div>
                 }
                 subtext={
                   data?.kpis.highestReturnProductByAmount
-                    ? `-$${data.kpis.highestReturnProductByAmount.return_amount.toLocaleString()} return loss`
-                    : "Max returned amount"
+                    ? `$${data.kpis.highestReturnProductByAmount.return_amount.toLocaleString()} returned`
+                    : "Maximum returned order amount"
                 }
                 icon={AlertTriangle}
                 accent="critical"
@@ -260,16 +251,16 @@ export default function DashboardPage() {
 
               {/* 9. Highest Return Product by Quantity */}
               <KpiCard
-                label="Top Return Qty"
+                label="Highest Return Product (Quantity)"
                 value={
-                  <div className="truncate text-base font-bold text-critical" title={data?.kpis.highestReturnProductByQuantity?.product_name || "None"}>
+                  <div className="truncate text-sm font-semibold text-critical" title={data?.kpis.highestReturnProductByQuantity?.product_name || "None"}>
                     {data?.kpis.highestReturnProductByQuantity?.product_name || "None"}
                   </div>
                 }
                 subtext={
                   data?.kpis.highestReturnProductByQuantity
                     ? `${data.kpis.highestReturnProductByQuantity.return_units} units returned`
-                    : "Max returned qty"
+                    : "Maximum returned quantity"
                 }
                 icon={RotateCcw}
                 accent="critical"
@@ -278,16 +269,16 @@ export default function DashboardPage() {
 
               {/* 10. Lowest Stock Product */}
               <KpiCard
-                label="Stockout Alert (Lowest Stock)"
+                label="Lowest-Stock Product"
                 value={
-                  <div className="truncate text-base font-bold text-amber-600" title={data?.kpis.lowestStockProduct?.product_name || "None"}>
+                  <div className="truncate text-sm font-semibold text-amber-600" title={data?.kpis.lowestStockProduct?.product_name || "None"}>
                     {data?.kpis.lowestStockProduct?.product_name || "None"}
                   </div>
                 }
                 subtext={
                   data?.kpis.lowestStockProduct
                     ? `${data.kpis.lowestStockProduct.total_stock} units across warehouses`
-                    : "Min available quantity"
+                    : "Min total available quantity"
                 }
                 icon={ArrowDownRight}
                 accent="warning"
@@ -296,16 +287,16 @@ export default function DashboardPage() {
 
               {/* 11. Highest Stock Product */}
               <KpiCard
-                label="Highest Stock Buffer"
+                label="Highest-Stock Product"
                 value={
-                  <div className="truncate text-base font-bold" title={data?.kpis.highestStockProduct?.product_name || "None"}>
+                  <div className="truncate text-sm font-semibold" title={data?.kpis.highestStockProduct?.product_name || "None"}>
                     {data?.kpis.highestStockProduct?.product_name || "None"}
                   </div>
                 }
                 subtext={
                   data?.kpis.highestStockProduct
-                    ? `${data.kpis.highestStockProduct.total_stock.toLocaleString()} units available`
-                    : "Max available quantity"
+                    ? `${data.kpis.highestStockProduct.total_stock.toLocaleString()} units across warehouses`
+                    : "Max total available quantity"
                 }
                 icon={PackageCheck}
                 loading={loading}
@@ -313,9 +304,9 @@ export default function DashboardPage() {
 
               {/* 12. Average Consumption Per Day */}
               <KpiCard
-                label="Avg Consumption Velocity"
-                value={`${(data?.kpis.averageConsumptionPerDay || 0).toLocaleString()} / day`}
-                subtext="Total units sold / date range days"
+                label="Average Consumption Per Day"
+                value={`${(data?.kpis.averageConsumptionPerDay || 0).toLocaleString()}`}
+                subtext="Units sold / days in date range"
                 icon={Zap}
                 loading={loading}
               />
@@ -327,23 +318,20 @@ export default function DashboardPage() {
               <WarehouseSalesDonut data={data?.warehouseSales || []} loading={loading} />
             </div>
 
-            {/* Top Performing SKUs Table */}
+            {/* Top Products Table */}
             <div className="card">
-              <div className="p-5 border-b border-surface-border flex items-center justify-between">
+              <div className="p-4 border-b border-surface-border flex items-center justify-between">
                 <div>
-                  <h3 className="font-semibold text-text-primary text-sm flex items-center gap-1.5">
-                    <Flame size={16} className="text-brand-blue" />
-                    <span>Top Performing SKUs & Velocity Ledger</span>
-                  </h3>
+                  <h3 className="font-semibold text-text-primary text-sm">Top Selling Products</h3>
                   <p className="text-xs text-text-muted mt-0.5">
-                    Top 5 products ranked by gross valid sales amount contribution
+                    Ranked by total sales amount
                   </p>
                 </div>
                 <Link
                   href="/products"
                   className="btn-secondary text-xs flex items-center gap-1 h-7"
                 >
-                  <span>View All Products</span>
+                  <span>View All</span>
                   <ArrowRight size={12} />
                 </Link>
               </div>
@@ -352,45 +340,45 @@ export default function DashboardPage() {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr>
-                      <th className="table-header w-12 text-center">Rank</th>
-                      <th className="table-header">Product Name</th>
-                      <th className="table-header">SKU Code</th>
+                      <th className="table-header w-12 text-center">#</th>
+                      <th className="table-header">Product</th>
+                      <th className="table-header">SKU</th>
                       <th className="table-header">Category</th>
                       <th className="table-header text-right">Units Sold</th>
-                      <th className="table-header text-right">Gross Sales ($)</th>
-                      <th className="table-header text-right">Return ($)</th>
+                      <th className="table-header text-right">Sales Amount</th>
+                      <th className="table-header text-right">Return Amount</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(data?.topProducts || []).map((prod, idx) => (
-                      <tr key={prod.sku} className="hover:bg-slate-50 transition-colors">
-                        <td className="table-cell text-center font-bold text-text-muted">
-                          #{idx + 1}
+                      <tr key={prod.sku} className="hover:bg-surface-hover transition-colors">
+                        <td className="table-cell text-center text-text-muted font-medium text-xs">
+                          {idx + 1}
                         </td>
-                        <td className="table-cell font-medium text-text-primary">
+                        <td className="table-cell font-medium text-text-primary text-xs">
                           {prod.product_name}
                         </td>
-                        <td className="table-cell font-mono text-xs text-brand-blue">
+                        <td className="table-cell font-mono text-xs text-text-secondary">
                           {prod.sku}
                         </td>
                         <td className="table-cell text-xs text-text-secondary">
                           <span className="badge badge-neutral">{prod.category}</span>
                         </td>
-                        <td className="table-cell-numeric text-text-primary">
-                          {prod.units.toLocaleString()} pcs
+                        <td className="table-cell-numeric text-text-primary text-xs">
+                          {prod.units.toLocaleString()}
                         </td>
-                        <td className="table-cell-numeric font-semibold text-text-primary">
+                        <td className="table-cell-numeric font-medium text-text-primary text-xs">
                           ${prod.sales.toLocaleString()}
                         </td>
-                        <td className="table-cell-numeric text-critical font-medium">
+                        <td className="table-cell-numeric text-critical text-xs">
                           ${prod.returns.toLocaleString()}
                         </td>
                       </tr>
                     ))}
                     {(!data?.topProducts || data.topProducts.length === 0) && (
                       <tr>
-                        <td colSpan={7} className="text-center py-8 text-xs text-text-muted">
-                          No product sales records available
+                        <td colSpan={7} className="text-center py-6 text-xs text-text-muted">
+                          No product records available.
                         </td>
                       </tr>
                     )}

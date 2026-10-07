@@ -75,24 +75,24 @@ export default function ProductsPage() {
   };
 
   return (
-    <AppShell title="Product-wise Sales & Stock Performance" breadcrumb={["NexusOps", "Products", "Product-wise Report"]}>
+    <AppShell title="Products" breadcrumb={["NexusOps", "Products"]}>
       <div className="space-y-5">
         {/* Top Header Card */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-lg bg-white border border-surface-border">
           <div>
-            <h2 className="text-base font-bold text-text-primary">Catalog SKU Performance Ledger</h2>
+            <h2 className="text-base font-semibold text-text-primary">Product Performance</h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Unit volumes, gross sales revenue, returns leakage, multi-facility total stock, and top performing marketplace per SKU.
+              Sales volume, return amounts, total stock, and top marketplace per SKU.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <a
               href={getExportUrl()}
               download
-              className="btn-primary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
+              className="btn-secondary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
             >
               <Download size={14} />
-              <span>Export Filtered CSV</span>
+              <span>Export CSV</span>
             </a>
           </div>
         </div>

@@ -100,26 +100,21 @@ export default function InventoryPage() {
   };
 
   return (
-    <AppShell title="Global Stock Balances & Multi-Facility Allocation" breadcrumb={["NexusOps", "Inventory", "Live Ledger"]}>
+    <AppShell title="Inventory" breadcrumb={["NexusOps", "Inventory"]}>
       <div className="space-y-5">
         {/* Top Header Card */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-lg bg-white border border-surface-border">
           <div>
-            <div className="flex items-center gap-2 text-[11px] text-text-muted font-mono uppercase tracking-wider mb-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Multi-Facility Allocation Engine &bull; Reorder Engine Active</span>
-            </div>
-            <h2 className="text-base font-bold text-text-primary">Consolidated Inventory & Stock Balances</h2>
+            <h2 className="text-base font-semibold text-text-primary">Inventory Management</h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Multi-facility allocations, safety buffers, stock depletion warnings, and node reorder triggers.
+              Warehouse stock balances, available quantities, and reorder alerts.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Link
               href="/admin/import"
-              className="btn-secondary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
+              className="btn-primary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
             >
-              <Warehouse size={14} className="text-brand-blue" />
               <span>Import Inventory</span>
             </Link>
           </div>
@@ -129,46 +124,46 @@ export default function InventoryPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="card p-4">
             <div className="flex items-center justify-between text-xs text-text-muted mb-1">
-              <span className="font-semibold uppercase tracking-wider">Catalog SKUs</span>
-              <Package size={16} className="text-brand-blue" />
+              <span className="font-medium">Total SKUs</span>
+              <Package size={15} className="text-brand-blue" />
             </div>
-            <div className="text-metric-lg font-bold text-text-primary tabular-nums">
+            <div className="text-2xl font-bold text-text-primary tabular-nums">
               {(summary?.totalSkus || 0).toLocaleString()}
             </div>
-            <div className="text-[11px] text-text-muted mt-1">Unique active catalog items</div>
+            <div className="text-[11px] text-text-muted mt-1">Unique catalog items</div>
           </div>
 
           <div className="card p-4">
             <div className="flex items-center justify-between text-xs text-text-muted mb-1">
-              <span className="font-semibold uppercase tracking-wider">Total Stock Balances</span>
-              <Warehouse size={16} className="text-brand-blue" />
+              <span className="font-medium">Total Stock</span>
+              <Warehouse size={15} className="text-brand-blue" />
             </div>
-            <div className="text-metric-lg font-bold text-text-primary tabular-nums">
-              {(summary?.totalStock || 0).toLocaleString()} <span className="text-sm font-normal text-text-muted">units</span>
+            <div className="text-2xl font-bold text-text-primary tabular-nums">
+              {(summary?.totalStock || 0).toLocaleString()}
             </div>
-            <div className="text-[11px] text-text-muted mt-1">Sum of available warehouse stock</div>
+            <div className="text-[11px] text-text-muted mt-1">Units across all warehouses</div>
           </div>
 
           <div className="card p-4">
             <div className="flex items-center justify-between text-xs text-text-muted mb-1">
-              <span className="font-semibold uppercase tracking-wider">Critical Restock Alerts</span>
-              <AlertTriangle size={16} className="text-amber-600" />
+              <span className="font-medium">Low Stock Alerts</span>
+              <AlertTriangle size={15} className="text-amber-600" />
             </div>
-            <div className="text-metric-lg font-bold text-amber-600 tabular-nums">
-              {(summary?.lowStockItems || 0).toLocaleString()} <span className="text-sm font-normal text-text-muted">SKUs</span>
+            <div className="text-2xl font-bold text-amber-600 tabular-nums">
+              {(summary?.lowStockItems || 0).toLocaleString()}
             </div>
-            <div className="text-[11px] text-amber-600 font-medium mt-1">At or below reorder threshold</div>
+            <div className="text-[11px] text-amber-600 mt-1">Items at or below reorder level</div>
           </div>
 
           <div className="card p-4">
             <div className="flex items-center justify-between text-xs text-text-muted mb-1">
-              <span className="font-semibold uppercase tracking-wider">Active Regional Nodes</span>
-              <Building2 size={16} className="text-brand-blue" />
+              <span className="font-medium">Active Warehouses</span>
+              <Building2 size={15} className="text-brand-blue" />
             </div>
-            <div className="text-metric-lg font-bold text-text-primary tabular-nums">
-              {summary?.warehouseCount || 0} <span className="text-sm font-normal text-text-muted">Facilities</span>
+            <div className="text-2xl font-bold text-text-primary tabular-nums">
+              {summary?.warehouseCount || 0}
             </div>
-            <div className="text-[11px] text-text-muted mt-1">WH-NORTH, WH-SOUTH, WH-EAST, WH-WEST</div>
+            <div className="text-[11px] text-text-muted mt-1">Fulfillment locations</div>
           </div>
         </div>
 
