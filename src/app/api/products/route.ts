@@ -3,6 +3,8 @@ import { productsQuerySchema } from "@/lib/validation/schemas";
 import { requireAuth } from "@/lib/auth/session";
 import { getProducts } from "@/lib/db/repository";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   const authError = await requireAuth();
   if (authError) return authError;
