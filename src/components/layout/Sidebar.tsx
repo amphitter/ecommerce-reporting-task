@@ -42,8 +42,8 @@ export default function Sidebar() {
           <span className="text-white font-bold text-sm">N</span>
         </div>
         <div>
-          <div className="font-bold text-text-primary text-sm leading-tight">NexusOps</div>
-          <div className="text-[10px] text-text-muted uppercase tracking-wider">Enterprise Analytics</div>
+          <div className="font-semibold text-text-primary text-sm leading-tight">NexusOps</div>
+          <div className="text-[11px] text-text-muted">Operations</div>
         </div>
       </div>
 
@@ -82,7 +82,7 @@ export default function Sidebar() {
           )}
         >
           <Settings size={18} />
-          <span>Admin / Import</span>
+          <span>Import Data</span>
         </Link>
         <button
           onClick={handleLogout}

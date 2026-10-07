@@ -3,8 +3,6 @@ import { requireAuth } from "@/lib/auth/session";
 import { importCsv, ImportType } from "@/lib/db/import";
 import { getDatabaseCounts } from "@/lib/db/repository";
 import { getDbClient } from "@/lib/db/engine";
-import fs from "fs";
-import path from "path";
 
 export async function GET(request: NextRequest) {
   const authError = await requireAuth();
@@ -24,30 +22,6 @@ export async function POST(request: NextRequest) {
   if (authError) return authError;
 
   try {
-    const contentType = request.headers.get("content-type") || "";
-
-    // Handle JSON request for loading provided sample files
-    if (contentType.includes("application/json")) {
-      const body = await request.json();
-      if (body.action === "load_sample") {
-        const type = body.type as ImportType;
-        if (!["products", "orders", "inventory"].includes(type)) {
-          return NextResponse.json({ error: "Invalid type" }, { status: 400 });
-        }
-
-        const samplePath = path.resolve(`/home/user/uploads/${type}.csv`);
-        if (!fs.existsSync(samplePath)) {
-          return NextResponse.json({ error: `Sample file for ${type} not found` }, { status: 404 });
-        }
-
-        const buffer = fs.readFileSync(samplePath);
-        const result = await importCsv(buffer, type);
-        const counts = await getDatabaseCounts();
-        return NextResponse.json({ ...result, counts });
-      }
-    }
-
-    // Handle FormData file upload
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const type = formData.get("type") as ImportType | null;

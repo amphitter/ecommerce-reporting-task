@@ -136,24 +136,24 @@ export default function OrdersPage() {
   };
 
   return (
-    <AppShell title="Order-wise Fulfillment & Sales Report" breadcrumb={["NexusOps", "Orders", "Order-wise Report"]}>
+    <AppShell title="Orders" breadcrumb={["NexusOps", "Orders"]}>
       <div className="space-y-5">
         {/* Top Header Card */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-lg bg-white border border-surface-border">
           <div>
-            <h2 className="text-base font-bold text-text-primary">Multi-Marketplace Order Ledger</h2>
+            <h2 className="text-base font-semibold text-text-primary">Order Report</h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Order tracking, warehouse fulfillment routing, unit amounts, and real-time SKU stock levels.
+              Order transactions across marketplaces and fulfillment warehouses.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <a
               href={getExportUrl()}
               download
-              className="btn-primary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
+              className="btn-secondary text-xs flex items-center gap-1.5 h-8 whitespace-nowrap"
             >
               <Download size={14} />
-              <span>Export Filtered CSV</span>
+              <span>Export CSV</span>
             </a>
           </div>
         </div>
@@ -174,7 +174,7 @@ export default function OrdersPage() {
             />
           </div>
           <div className="text-xs text-text-muted">
-            Found <span className="font-semibold text-text-primary tabular-nums">{total.toLocaleString()}</span> orders matching criteria
+            Found <span className="font-semibold text-text-primary tabular-nums">{total.toLocaleString()}</span> orders
           </div>
         </div>
 
