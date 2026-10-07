@@ -1,256 +1,260 @@
-# NexusOps — E-commerce Sales & Inventory Reporting Platform
+# NexusOps — E-commerce Sales & Inventory Platform
 
-NexusOps is a high-performance, enterprise-grade e-commerce operations analytics platform engineered for operations leads, financial analysts, and fulfillment coordinators managing multi-marketplace catalog products, order dispatches, stock balances, and regional fulfillment hubs.
-
-The platform is designed around six core engineering principles: **Correctness, Low Database Load, High Throughput, Clean Enterprise UX, Simple Architecture, and Scalability**.
+NexusOps is a high-throughput, performance-focused reporting and analytics platform designed for e-commerce operations. It handles product catalog management, multi-marketplace order dispatching, regional warehouse inventory balances, and executive KPI aggregation with minimal database load.
 
 ---
 
-## 🚀 Key Features
+## 1. System Architecture
 
-- **Consolidated Analytics Dashboard**: 12 operational KPIs calculated at the database layer (Total Sales, Total Returns, Units Sold/Returned, Return Rate, Average Order Value, Average Daily Consumption, Top Revenue Champion by Sales Amount, Return Anomalies by Amount & Quantity, Stock Out Alert, Highest Stock Buffer).
-- **Interactive Visualizations**:
-  - Daily Sales & Returns Flow (Recharts dual area gradient curve).
-  - Warehouse Allocation & Throughput Share (interactive donut chart with dynamic percentage shares).
-- **Multi-Facility Order Ledger (`/orders`)**:
-  - Full transactional order list with multi-marketplace channel attribution (Amazon, Flipkart, Myntra, Meesho, Shopify).
-  - Real-time warehouse routing using canonical allocation logic.
-  - Server-side pagination (25, 50, 100 rows per page), sorting, debounced search, and zero-inventory-duplication stock lookup.
-- **Catalog Performance Ledger (`/products`)**:
-  - Product-level performance aggregating unit sales, returned values, multi-warehouse stock totals, active warehouse counts, and top-selling channels.
-  - Strict inventory pre-aggregation preventing double-counting across multi-node inventory.
-- **Inventory & Reorder Control (`/inventory`)**:
-  - Real-time visibility into multi-node stock balances (`WH-NORTH`, `WH-SOUTH`, `WH-EAST`, `WH-WEST`).
-  - Critical restock alerts when stock drops below designated safety reorder thresholds.
-  - Fast filtering by stock state: `All`, `In Stock`, `Low Stock`, `Out of Stock`.
-- **Idempotent CSV Import Pipeline (`/admin/import`)**:
-  - Bulk ingestion pipeline for `products.csv` (1,000 items), `orders.csv` (5,000 items), and `inventory.csv` (4,000 items).
-  - Row-level Zod validation, price checks, non-negative quantity constraints.
-  - Re-importing does not create duplicates.
-- **Filtered Server-Side CSV Exports**:
-  - Order-wise and Product-wise export endpoints that stream CSV downloads directly from filtered database queries without downloading the entire dataset to the browser.
-- **Enterprise Security & Auth**:
-  - Single admin authentication backed by HTTP-Only encrypted session cookies (`jose` JWT).
-  - In-memory rate limiting against brute force attempts.
-  - Route protection middleware safeguarding all operational views and APIs.
-  - Supabase service role credentials never exposed to client browsers.
+The architecture separates the presentation and server layers (Next.js deployed on Vercel) from the persistent transactional data layer (Supabase PostgreSQL).
+
+```
+                                      CLIENT BROWSER
+                                            │
+                             HTTPS / JSON / Session Cookie
+                                            ▼
+                    ┌────────────────────────────────────────────────┐
+                    │               VERCEL EDGE & SERVER             │
+                    │                  (Next.js 16)                  │
+                    │                                                │
+                    │  App Router Server Components & Client Slices  │
+                    │  ├── Middleware (Session Verification)        │
+                    │  ├── Route Handlers (/api/dashboard, etc.)    │
+                    │  ├── Streaming CSV Exporters                   │
+                    │  └── Zod Input Validation Layer                │
+                    └───────────────────────┬────────────────────────┘
+                                            │
+                                  SSL / Prepared SQL
+                                            ▼
+                    ┌────────────────────────────────────────────────┐
+                    │              SUPABASE POSTGRESQL               │
+                    │                                                │
+                    │  Normalized Tables:                            │
+                    │  ├── products (SKU & Product ID unique)       │
+                    │  ├── orders (Order ID unique, final warehouse) │
+                    │  ├── inventory (Composite unique SKU + WH)    │
+                    │  └── warehouses                               │
+                    │                                                │
+                    │  Database Functions & Optimization:            │
+                    │  ├── get_dashboard_metrics() (Consolidated)   │
+                    │  ├── get_inventory_summary()                  │
+                    │  └── Composite Indexing Engine                 │
+                    └────────────────────────────────────────────────┘
+```
+
+### Component Roles
+
+1. **Client Tier**: Renders a compact, high-density interface built with Tailwind CSS and Recharts. The client never receives raw multi-thousand-row datasets; it receives only paginated slices or pre-aggregated chart points.
+2. **Next.js Server Tier (Vercel)**:
+   - Validates all incoming query parameters and payload structures via Zod schemas.
+   - Manages single-admin authentication using signed, HTTP-only session cookies (`jose` JWT) — credentials never touch client storage.
+   - Enforces rate-limiting to protect endpoints from abusive requests.
+   - Routes database queries directly to PostgreSQL using parameterized inputs.
+3. **Database Tier (Supabase PostgreSQL)**:
+   - Acts as the single source of truth for transactional records.
+   - Executes aggregation, filtering, and sorting close to the disk via PostgreSQL's cost-based query planner.
+   - Enforces data integrity through foreign keys, check constraints (`quantity > 0`, `selling_price >= 0`), and unique constraints.
 
 ---
 
-## 📐 Architecture & Technology Stack
+## 2. Why PostgreSQL & Supabase?
 
-| Layer | Technology |
-|---|---|
-| **Framework** | Next.js (App Router, Server Components & Dynamic Route Handlers) |
-| **Language** | TypeScript (Strict Mode) |
-| **Styling** | Tailwind CSS (Corporate Modern aesthetic per Executive Precision design tokens) |
-| **Database** | Supabase PostgreSQL (Production) / Embedded Relational SQL Engine (Local) |
-| **Charts** | Recharts |
-| **Validation** | Zod |
-| **Icons** | Lucide React |
-| **Session / Auth** | `jose` (HS256 encrypted HTTP-Only cookies) |
-| **CSV Parser** | `csv-parse` (Streaming sync bulk engine) |
-| **Testing** | Vitest |
+The platform's workload is relational and reporting-heavy. PostgreSQL was selected over NoSQL/document stores for specific architectural reasons:
+
+- **Relational Integrity**: SKUs, product identifiers, orders, and multi-warehouse stock entries must remain traceable without data divergence.
+- **Financial Precision**: Uses `NUMERIC(12,2)` types for monetary values to eliminate binary floating-point rounding errors common in reporting.
+- **In-Database Aggregations**: PostgreSQL executes group-bys, conditional sums, and date-range truncations in native compiled C code, returning small JSON summaries to Next.js instead of transferring thousands of rows over the network.
+- **Cost-Based Query Optimization**: The engine leverages B-tree and composite indexes to index only what is queried (`order_date`, `marketplace`, `final_warehouse`, `order_status`).
 
 ---
 
-## 🏛 Database Schema & Design
+## 3. Engineering Decisions: How We Made It Efficient
 
-The database schema is normalized into 4 primary relational tables with constraints and access-pattern indexes:
+### Principle 1: Zero `SELECT *`
+Every query in the application explicitly lists only the required columns. Unused columns are never fetched, reducing memory consumption, buffer cache pressure, and network serialization overhead.
 
-```
-┌────────────────────────────────────────────────────────┐
-│                        products                        │
-├────────────────────────────────────────────────────────┤
-│ id                 SERIAL PRIMARY KEY                  │
-│ product_id         TEXT UNIQUE NOT NULL                │
-│ sku                TEXT UNIQUE NOT NULL                │
-│ product_name       TEXT NOT NULL                       │
-│ category           TEXT NOT NULL                       │
-│ brand              TEXT NOT NULL                       │
-│ selling_price      NUMERIC(12,2) NOT NULL              │
-│ cost_price         NUMERIC(12,2) NOT NULL              │
-│ default_warehouse  TEXT NOT NULL                       │
-│ active             CHAR(1) DEFAULT 'Y'                 │
-│ created_at         TIMESTAMPTZ DEFAULT NOW()           │
-│ updated_at         TIMESTAMPTZ DEFAULT NOW()           │
-└────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│                         orders                         │
-├────────────────────────────────────────────────────────┤
-│ id                  SERIAL PRIMARY KEY                 │
-│ order_id            TEXT UNIQUE NOT NULL               │
-│ order_date          DATE NOT NULL                      │
-│ marketplace         TEXT NOT NULL                      │
-│ sku                 TEXT NOT NULL                      │
-│ product_id          TEXT NOT NULL                      │
-│ category            TEXT NOT NULL                      │
-│ quantity            INTEGER NOT NULL CHECK (qty > 0)   │
-│ selling_price       NUMERIC(12,2) NOT NULL             │
-│ order_amount        NUMERIC(12,2) NOT NULL             │
-│ order_status        TEXT NOT NULL                      │
-│ allocated_warehouse TEXT                               │
-│ default_warehouse   TEXT                               │
-│ final_warehouse     TEXT NOT NULL                      │
-│ created_at          TIMESTAMPTZ DEFAULT NOW()          │
-└────────────────────────────────────────────────────────┘
-                           ▲
-                           │
-┌────────────────────────────────────────────────────────┐
-│                       inventory                        │
-├────────────────────────────────────────────────────────┤
-│ id                 SERIAL PRIMARY KEY                  │
-│ sku                TEXT NOT NULL                       │
-│ product_id         TEXT NOT NULL                       │
-│ warehouse          TEXT NOT NULL                       │
-│ available_quantity INTEGER NOT NULL CHECK (qty >= 0)   │
-│ reorder_level      INTEGER NOT NULL CHECK (rl >= 0)    │
-│ inventory_status   TEXT NOT NULL                       │
-│ last_updated       DATE NOT NULL                       │
-│ UNIQUE(sku, warehouse)                                 │
-└────────────────────────────────────────────────────────┘
-```
+### Principle 2: Consolidated Dashboard Endpoint (`/api/dashboard`)
+Rather than dispatching a separate HTTP request per KPI (e.g., `/api/total-sales`, `/api/returns`, `/api/units`), the dashboard issues **a single consolidated request**. The database executes all 12 KPI calculations, the 30-day sales trend curve, the warehouse throughput donut distribution, and top-selling products in **one database round-trip**.
 
-### Critical Access Pattern Indexes
-- `idx_orders_order_date`: Date range queries and daily aggregation.
-- `idx_orders_sku`: Order-to-product joins and SKU searches.
-- `idx_orders_composite_filter`: Composite filter on `(order_date, marketplace, final_warehouse, order_status)`.
-- `idx_inventory_sku`: Fast SKU-level inventory grouping.
-- `idx_inventory_warehouse`: Multi-node warehouse queries.
+### Principle 3: Strict Anti-Duplication Inventory Aggregation
+When a SKU exists across multiple warehouses (e.g., Delhi = 20, Mumbai = 30), joining orders directly with raw inventory rows multiplies stock counts. The platform strictly **aggregates inventory by SKU first** before joining with product or order records:
 
----
-
-## 💼 Core Business Rules & Formulas
-
-### 1. Canonical Warehouse Allocation Rule
-```
-If allocated_warehouse is present and not blank:
-    final_warehouse = allocated_warehouse
-Else if default_warehouse is present and not blank:
-    final_warehouse = default_warehouse
-Else:
-    final_warehouse = "Warehouse Not Assigned"
-```
-The canonical `final_warehouse` is computed during import and applied consistently across order tracking, warehouse metrics, and the warehouse sales ratio donut chart.
-
-### 2. Valid Sales & Return Metrics
-- **Valid Sales Amount**: `SUM(order_amount)` where `order_status NOT IN ('Cancelled', 'Returned')`.
-- **Total Return Amount**: `SUM(order_amount)` where `order_status = 'Returned'`.
-- **Total Units Sold**: `SUM(quantity)` where `order_status NOT IN ('Cancelled', 'Returned')`.
-- **Total Units Returned**: `SUM(quantity)` where `order_status = 'Returned'`.
-- **Return Rate**: `Total Units Returned / Total Units Sold`.
-- **Average Order Value (AOV)**: `Total Sales Amount / Number of Valid Orders`.
-- **Average Daily Consumption**: `Total Units Sold / Number of Days in Selected Range`.
-- **Highest Selling Product**: Product with maximum total sales amount (clearly noted in UI).
-
-### 3. Inventory Aggregation Rule (Anti-Duplication)
-A single SKU can exist across multiple regional warehouses (`WH-NORTH`, `WH-SOUTH`, etc.). To prevent duplicate stock and sales totals when joining tables, **inventory is grouped by SKU first** before joining with product or order records:
 ```sql
 SELECT sku, SUM(available_quantity) AS total_stock
 FROM inventory
 GROUP BY sku;
 ```
 
+### Principle 4: Server-Side Pagination & Bounded Page Sizes
+Large tables (`/orders`, `/products`, `/inventory`) never stream unbounded records to the DOM. Page sizes are restricted to `25`, `50`, or `100` rows. Zod enforces this strictly on the server:
+
+```typescript
+pageSize: z.coerce.number().int().refine(v => [25, 50, 100].includes(v))
+```
+
+### Principle 5: Streaming Server-Side CSV Exports
+CSV downloads (`/api/exports/orders` and `/api/exports/products`) do not fetch the full table into browser memory. Instead, the server streams the filtered database query output directly as `text/csv; charset=utf-8` using chunked transfer encoding.
+
+### Principle 6: Debounced Input Filtering
+All search inputs (SKU, Product Name, Order ID) use a 350ms debounce mechanism, preventing wasteful database requests during active keystrokes.
+
 ---
 
-## 🛠 Local Setup & Development
+## 4. Business Logic & Calculation Rules
+
+### Warehouse Allocation Rule
+Derived canonically during data import:
+```
+IF allocated_warehouse is present and non-blank:
+    USE allocated_warehouse
+ELSE IF default_warehouse is present and non-blank:
+    USE default_warehouse
+ELSE:
+    USE "Warehouse Not Assigned"
+```
+
+### KPI Formulas
+| KPI | Formula / Rule |
+|---|---|
+| **Total Sales Amount** | `SUM(order_amount)` where `order_status NOT IN ('Cancelled', 'Returned')` |
+| **Total Return Amount** | `SUM(order_amount)` where `order_status = 'Returned'` |
+| **Total Units Sold** | `SUM(quantity)` where `order_status NOT IN ('Cancelled', 'Returned')` |
+| **Total Units Returned** | `SUM(quantity)` where `order_status = 'Returned'` |
+| **Return Rate** | `Total Units Returned / Total Units Sold` |
+| **Average Order Value** | `Total Sales Amount / Valid Orders Count` |
+| **Average Consumption / Day** | `Total Units Sold / Number of Days in Selected Date Range` |
+| **Highest-Selling Product** | Maximum `SUM(order_amount)` where `order_status NOT IN ('Cancelled', 'Returned')` *(determined by sales amount)* |
+| **Highest Return by Amount** | Maximum `SUM(order_amount)` where `order_status = 'Returned'` |
+| **Highest Return by Quantity** | Maximum `SUM(quantity)` where `order_status = 'Returned'` |
+| **Lowest-Stock Product** | Minimum `SUM(available_quantity)` across warehouses grouped by SKU |
+| **Highest-Stock Product** | Maximum `SUM(available_quantity)` across warehouses grouped by SKU |
+| **Warehouse Sales Ratio** | `Warehouse Sales / Total Valid Sales` |
+
+---
+
+## 5. How to Use the Platform
+
+### Step 1: Authentication
+1. Navigate to `/login`.
+2. Enter your credentials:
+   - **Admin ID**: Value of `ADMIN_ID` in `.env.local` (default: `admin`)
+   - **Password**: Value of `ADMIN_PASSWORD` in `.env.local`
+3. Click **Sign in**. A secure HTTP-Only session cookie will be issued.
+
+### Step 2: Ingesting Datasets
+The application starts fresh with zero records. To import data:
+1. Go to **Import Data** in the left navigation (`/admin/import`).
+2. Select the dataset type:
+   - **Products CSV**: `product_id, sku, product_name, category, brand, selling_price, cost_price, default_warehouse, active`
+   - **Orders CSV**: `order_id, order_date, marketplace, sku, product_id, category, quantity, selling_price, order_amount, order_status, allocated_warehouse, default_warehouse, final_warehouse`
+   - **Inventory CSV**: `sku, product_id, warehouse, available_quantity, reorder_level, inventory_status, last_updated`
+3. Select your CSV file and click **Upload & Import**.
+4. The pipeline parses rows, applies validation schemas, resolves the canonical warehouse allocation, and executes a bulk upsert.
+5. Re-running imports is **idempotent**: unique constraints prevent duplicated records.
+
+### Step 3: Executive Dashboard (`/dashboard`)
+- View 12 operational KPIs computed in real time.
+- Filter by date range, marketplace, warehouse, product category, order status, or SKU.
+- View the **Daily Sales & Returns** trend curve.
+- Inspect the **Warehouse Sales Distribution** donut chart.
+- Review top-selling SKUs ranked by total sales revenue.
+
+### Step 4: Reports & Table Views
+- **Orders Report (`/orders`)**: View transaction-level dispatches with current available stock. Sort by date, quantity, or order amount.
+- **Product Performance (`/products`)**: Review catalog-level volume, sales revenue, return leakage, multi-warehouse stock, and top marketplace.
+- **Inventory Ledger (`/inventory`)**: Review warehouse stock balances, low-stock warnings, and reorder levels.
+
+### Step 5: Exporting Data
+Click **Export CSV** on either the Orders or Products pages. The exported file respects your active filters and streams directly to your browser.
+
+---
+
+## 6. Local Setup & Testing
 
 ### Prerequisites
-- Node.js 18.17+ or 20+
+- Node.js 18.17+ or Node.js 20+
 - npm 9+
 
-### 1. Clone & Install
+### Installation
 ```bash
-git clone https://github.com/your-username/ecommerce-reporting-platform.git
-cd ecommerce-reporting-platform
+git clone https://github.com/your-username/nexusops.git
+cd nexusops
 npm install
 ```
 
-### 2. Configure Environment Variables
+### Configure Environment Variables
 Copy `.env.example` to `.env.local`:
 ```bash
 cp .env.example .env.local
 ```
 
-Set the credentials:
+Set the following values:
 ```env
 ADMIN_ID=admin
-ADMIN_PASSWORD=admin123
-SESSION_SECRET=nexusops-super-secure-jwt-secret-key-32bytes-min
-# Optional: Set remote Supabase credentials when deploying to Supabase
+ADMIN_PASSWORD=your_secure_password
+SESSION_SECRET=at_least_32_characters_random_secret_string
+
+# Optional: Supabase configuration (when connecting to cloud Supabase)
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-### 3. Run Development Server
+### Run Tests
+Execute the Vitest suite covering warehouse allocation, sales/return logic, inventory aggregation, and formula correctness:
+```bash
+npm test
+```
+
+### Start Development Server
 ```bash
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### 4. Run Business Logic Tests
-```bash
-npm test
-```
-Executes the Vitest test suite covering warehouse allocation, sales/returns exclusions, return rate, AOV, and inventory aggregation rules.
-
 ---
 
-## 📥 Ingesting Data
+## 7. Supabase Database Setup & Migrations
 
-1. Log in at `/login` using:
-   - **Admin ID**: `admin`
-   - **Password**: `admin123`
-2. Navigate to **Admin / Import** (`/admin/import`).
-3. Select the dataset:
-   - **Products CSV** (`products.csv`, 1,000 rows)
-   - **Orders CSV** (`orders.csv`, 5,000 rows)
-   - **Inventory CSV** (`inventory.csv`, 4,000 rows)
-4. Upload your CSV files (`products.csv`, `orders.csv`, `inventory.csv`) and click **Upload & Import**.
-5. Inspect the validation summary. Once imported, all operational dashboards and reports are immediately populated.
+When deploying with Supabase PostgreSQL:
 
----
-
-## 🌐 Deploying to Vercel with Supabase
-
-### 1. Set Up Supabase Project
 1. Create a project at [supabase.com](https://supabase.com).
-2. Open the **SQL Editor** in Supabase and run the migration script:
-   `supabase/migrations/001_init_schema.sql`
-   This sets up the normalized tables, indexes, triggers, and the consolidated PostgreSQL RPC function `get_dashboard_metrics()`.
-
-### 2. Deploy to Vercel
-1. Import your repository into Vercel.
-2. In the Vercel Project Settings &rarr; **Environment Variables**, add:
-   - `ADMIN_ID`: your admin ID (e.g. `admin`)
-   - `ADMIN_PASSWORD`: your secure admin password
-   - `SESSION_SECRET`: 32+ character random string
-   - `NEXT_PUBLIC_SUPABASE_URL`: your Supabase project URL
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: your Supabase anonymous public key
-   - `SUPABASE_SERVICE_ROLE_KEY`: your Supabase service role private key
-3. Click **Deploy**.
+2. Open the **SQL Editor** in your Supabase dashboard.
+3. Open `supabase/migrations/001_init_schema.sql` from this repository.
+4. Paste the SQL script and click **Run**.
+5. The migration creates:
+   - The normalized `products`, `orders`, `inventory`, and `warehouses` tables.
+   - All check constraints and unique indexes.
+   - The consolidated `get_dashboard_metrics()` and `get_inventory_summary()` stored functions.
+6. Retrieve your credentials from **Project Settings > API**:
+   - `Project URL` &rarr; `NEXT_PUBLIC_SUPABASE_URL`
+   - `anon public` &rarr; `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `service_role secret` &rarr; `SUPABASE_SERVICE_ROLE_KEY` *(server-side only)*
 
 ---
 
-## ⚡ Performance & Scalability Strategy
+## 8. Deployment to Vercel
 
-### Why PostgreSQL + Supabase?
-- Relational integrity with foreign keys and unique constraints (`sku`, `order_id`, `(sku, warehouse)`).
-- Native numeric precision types (`NUMERIC(12,2)`) to eliminate floating-point arithmetic errors in financial calculations.
-- Sophisticated cost-based query optimizer that leverages multi-column composite indexes.
-- Single database round-trip RPC functions combining 12 KPI aggregations, trend series, and allocation shares.
+1. Push your repository to GitHub.
+2. Log in to [Vercel](https://vercel.com) and click **Add New > Project**.
+3. Import your GitHub repository.
+4. Under **Environment Variables**, add:
+   - `ADMIN_ID`: your admin username
+   - `ADMIN_PASSWORD`: your admin password
+   - `SESSION_SECRET`: a 32+ character random string
+   - `NEXT_PUBLIC_SUPABASE_URL`: your Supabase project URL
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: your Supabase anonymous key
+   - `SUPABASE_SERVICE_ROLE_KEY`: your Supabase service role key
+5. Build settings will auto-detect Next.js.
+6. Click **Deploy**.
 
-### Optimization Decisions Implemented
-1. **Consolidated Dashboard Endpoint**: `/api/dashboard` returns all KPI cards, daily velocity charts, warehouse donut charts, and top products in a single database round-trip.
-2. **Server-Side Pagination**: Large tables (`/orders`, `/products`, `/inventory`) only fetch 25, 50, or 100 rows per request.
-3. **No `SELECT *`**: Queries specify only the exact columns required by the UI.
-4. **Debounced Search**: Search filters are debounced by 350ms to prevent spamming the database on keystrokes.
-5. **No Bulk Dataset in Client Memory**: Aggregations are performed at the SQL engine level.
+---
 
-### Path to Scale (100x Volume)
-- **Table Partitioning**: Range-partition the `orders` table by year/month (`order_date`) for fast pruning.
-- **Materialized Views**: Daily pre-aggregated views refreshed periodically for historical months.
-- **Read Replicas**: Route reporting queries to read replicas while transactional order writes hit the primary database.
+## 9. Future Scalability Blueprint
+
+While the current architecture easily handles millions of rows using indexed PostgreSQL queries, the system has a straightforward scaling roadmap for higher scale:
+
+1. **Table Partitioning (10M+ Orders)**: Partition the `orders` table by month (`RANGE (order_date)`) to allow PostgreSQL to prune partition scans on date-range queries.
+2. **Materialized Reporting Views**: Use hourly or daily refreshed materialized views for historical periods to make dashboard queries near-instantaneous.
+3. **Read Replicas**: Direct all reporting and analytical reads (`/api/dashboard`, `/api/exports`) to a Supabase read replica while transactional writes target the primary node.
+4. **Edge CDN Caching**: Cache static filter dropdowns (`/api/filter-options`) using `stale-while-revalidate` at the Vercel Edge.
